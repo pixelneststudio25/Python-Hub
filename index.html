@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PythonHub</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#060A14;--pn:#0C1322;--ln:#1B2744;--tx:#E6ECFF;--mu:#8A97B8;--ac:#4D8DFF;--ac2:#8FD0FF;--ok:#34D399;--code:#050810;--r:14px}
+[data-theme=light]{--bg:#F3F6FD;--pn:#FFFFFF;--ln:#DAE3F3;--tx:#0E1830;--mu:#5B6B8C;--ac:#2F6BFF;--ac2:#2F6BFF;--code:#EDF2FC}
+*{box-sizing:border-box;margin:0}
+body{font:15px/1.65 Inter,system-ui,sans-serif;background:radial-gradient(900px 520px at 85% -10%,#173a7a55,transparent),var(--bg);color:var(--tx);min-height:100vh}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+#app{display:grid;grid-template-columns:290px 1fr;min-height:100vh;transition:.3s}
+body.collapsed #app{grid-template-columns:0 1fr}
+#side{background:var(--pn);border-right:1px solid var(--ln);padding:18px;position:sticky;top:0;height:100vh;overflow:auto}
+body.collapsed #side{padding:0;overflow:hidden;border:0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;margin-bottom:14px}
+.wh{margin:14px 0 4px;font-weight:600;font-size:13px;color:var(--mu)}
+.wh em{font-weight:400;opacity:.7}
+#side a{display:block;padding:6px 10px;border-radius:8px;font-size:14px;color:var(--mu)}
+#side a:hover,#side a.on{background:#4d8dff1f;color:var(--tx)}
+#side a.dn{color:var(--ok)}
+.tools{margin-top:22px;display:grid;gap:8px}
+.gh{background:none;border:1px solid var(--ln);color:var(--tx);border-radius:10px;padding:8px 12px;font:500 13px Inter;cursor:pointer;text-align:center}
+.gh:hover{border-color:var(--ac)}
+main{padding:20px 32px 40px;max-width:980px;width:100%}
+#top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.ib{background:var(--pn);border:1px solid var(--ln);color:var(--tx);border-radius:10px;width:38px;height:38px;font-size:16px;cursor:pointer}
+.view{animation:in .45s ease}
+@keyframes in{from{opacity:0;transform:translateY(10px)}}
+h1{font-size:30px;line-height:1.2;letter-spacing:-.02em;margin-bottom:12px}
+h2{font-size:19px;margin:28px 0 12px;letter-spacing:-.01em}
+p{margin:8px 0}
+.mu{color:var(--mu)}
+.card{background:var(--pn);border:1px solid var(--ln);border-radius:var(--r);padding:18px;margin-bottom:12px;transition:border-color .2s}
+.card:hover{border-color:#4d8dff66}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.wg{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.tg{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.grid .card{margin:0}
+.big{font-size:24px;font-weight:700}
+.hero{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:14px;background:linear-gradient(135deg,#12306a66,var(--pn))}
+.hero h1{font-size:34px}
+.btn{display:inline-block;margin-top:10px;background:linear-gradient(135deg,var(--ac),#2F6BFF);color:#fff;border:0;border-radius:10px;padding:10px 18px;font:600 14px Inter;cursor:pointer;box-shadow:0 6px 22px #2f6bff55}
+.btn2{border:1px solid var(--ln);border-radius:10px;padding:9px 14px;font-size:14px;color:var(--mu);max-width:48%}
+.btn2:hover{border-color:var(--ac);color:var(--tx)}
+.nav{display:flex;justify-content:space-between;gap:10px;margin-top:30px}
+.dots{display:flex;gap:6px;margin:10px 0}
+.dot{width:14px;height:14px;border-radius:50%;border:1px solid var(--ln);background:var(--code)}
+.dot.on{background:var(--ac);border-color:var(--ac);box-shadow:0 0 10px var(--ac)}
+a.dot:hover{border-color:var(--ac)}
+.vid{aspect-ratio:16/9;border-radius:var(--r);overflow:hidden;background:#000;border:1px solid var(--ln)}
+.vid iframe{width:100%;height:100%;display:block}
+.chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+.chip{border:1px solid var(--ln);border-radius:99px;padding:3px 12px;font-size:13px;color:var(--mu)}
+.chip.ok{color:var(--ok);border-color:var(--ok);background:#34d39914}
+.lnk{font-size:13px;color:var(--ac2);cursor:pointer;margin-left:auto}
+pre{background:var(--code);border:1px solid var(--ln);border-radius:10px;padding:14px;overflow:auto;font:13px/1.6 'JetBrains Mono',monospace;margin:8px 0}
+code{font:13px 'JetBrains Mono',monospace;background:var(--code);padding:1px 6px;border-radius:6px}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--ac2);font-weight:500}
+.q{margin-bottom:16px}
+.q label{display:block;padding:6px 10px;border-radius:8px;cursor:pointer}
+.q label:hover{background:#4d8dff14}
+.good{background:#34d39922}
+.bad{background:#f8717126}
+.row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--ln)}
+.row:last-child{border:0}
+.heat{display:grid;grid-template-rows:repeat(7,1fr);grid-auto-flow:column;gap:4px;margin-top:12px;overflow-x:auto;padding-bottom:4px}
+.heat i{width:14px;height:14px;border-radius:4px;background:var(--code);border:1px solid var(--ln)}
+.heat i.h1{background:#4d8dff44}.heat i.h2{background:#4d8dff88}.heat i.h3{background:#4d8dffcc}.heat i.h4{background:var(--ac);box-shadow:0 0 8px var(--ac)}
+.heat i.f{opacity:.25}
+.bd{display:flex;flex-wrap:wrap;gap:10px}
+.bg{border:1px solid var(--ln);border-radius:99px;padding:6px 14px;color:var(--mu);opacity:.6}
+.bg.on{opacity:1;color:var(--tx);border-color:var(--ac);box-shadow:0 0 14px #4d8dff55}
+#bnav{display:none;position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--pn);border-top:1px solid var(--ln);padding:6px 0 max(6px,env(safe-area-inset-bottom))}
+#bnav a{flex:1;display:flex;flex-direction:column;align-items:center;font-size:18px;line-height:1.3;color:var(--mu)}
+#bnav a span{font-size:11px}
+#bnav a.on{color:var(--ac)}
+.toast{position:fixed;left:50%;top:20px;transform:translateX(-50%);background:var(--pn);border:1px solid var(--ac);border-radius:12px;padding:12px 20px;z-index:50;box-shadow:0 10px 40px #4d8dff55;animation:in .4s}
+.cf{position:fixed;top:-10px;width:9px;height:14px;border-radius:2px;z-index:40;pointer-events:none;animation:fall 1.9s ease-in forwards}
+@keyframes fall{to{transform:translateY(105vh) rotate(540deg);opacity:.2}}
+@media(max-width:899px){
+#app{display:block}
+#side{position:fixed;inset:0 auto 0 0;width:min(310px,86vw);z-index:30;transform:translateX(-100%);transition:transform .3s;box-shadow:12px 0 40px #0008}
+#side.open{transform:none}
+#bnav{display:flex}
+main{padding:16px 18px 90px}}
+@media(max-width:720px){h1,.hero h1{font-size:25px}.hero{padding:16px}.btn2{font-size:13px}}
+@media(max-width:480px){.grid{grid-template-columns:1fr 1fr}.wg,.tg{grid-template-columns:1fr}.hero{flex-direction:column;align-items:flex-start}.nav{flex-direction:column}.btn2{max-width:100%}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+<style>
+:root{--fd:'Cormorant Garamond',Georgia,serif;--sb:#2A3A63;--s1:8px;--s2:16px;--s3:24px;--s4:32px;--s5:56px}
+[data-theme=light]{--sb:#B9C7E6}
+*{scrollbar-width:thin;scrollbar-color:var(--sb) transparent}
+::-webkit-scrollbar{width:12px;height:12px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--sb);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--ac);background-clip:content-box}
+::selection{background:#4d8dff55}
+body{font-size:16px;line-height:1.75}
+h1,h2,h3,.brand span,.big,.toc b{font-family:var(--fd);font-weight:600;letter-spacing:-.01em}
+h1{font-size:clamp(40px,5vw,60px);line-height:1.05;margin:var(--s1) 0 var(--s3)}
+h2{font-size:32px;line-height:1.2;margin:var(--s5) 0 var(--s2)}
+h3{font-size:27px;line-height:1.25;margin:8px 0 var(--s3)}
+.big{font-size:42px;line-height:1.1}
+main{padding:var(--s4) clamp(20px,5vw,72px) 96px;max-width:1240px}
+#top{margin-bottom:var(--s4)}
+#side{padding:var(--s3) var(--s2)}
+.brand{font-size:28px;margin:0 8px var(--s3)}
+.wk{display:block;margin-bottom:6px}
+.wk>summary,.wk.soon{list-style:none;display:grid;grid-template-columns:1fr auto;padding:12px;cursor:pointer;border-radius:12px;color:var(--tx);font-size:14px;line-height:1.4}
+.wk>summary::-webkit-details-marker{display:none}
+.wk span{font-size:12px;color:var(--mu)}
+.wk em{font-style:normal;font-weight:500;grid-column:1}
+.wk small{grid-column:2;grid-row:1/3;align-self:center;color:var(--mu);font-size:12px}
+.wk.soon{opacity:.45;cursor:default}
+.wk[open]>summary{background:#4d8dff14}
+#side a{padding:9px 12px 9px 16px;margin:2px 0 2px 10px;border-left:2px solid var(--ln);border-radius:0 8px 8px 0;line-height:1.4}
+#side a.on{border-color:var(--ac);background:#4d8dff1f;color:var(--tx)}
+#side.open{box-shadow:0 0 0 100vmax #0009}
+.card{padding:var(--s3);margin-bottom:var(--s2);border-radius:18px}
+.grid{gap:var(--s2)}
+.hero{padding:var(--s4)}
+.tabs{display:flex;gap:4px;padding:4px;background:var(--pn);border:1px solid var(--ln);border-radius:14px;width:max-content;max-width:100%;overflow-x:auto;margin:var(--s3) 0 var(--s4)}
+.tabs button{background:none;border:0;color:var(--mu);font:500 14px Inter;padding:10px 22px;border-radius:10px;cursor:pointer;transition:.2s;min-height:44px}
+.tabs button.on{background:var(--ac);color:#fff;box-shadow:0 4px 18px #4d8dff66}
+.tabs button.ck::after{content:' ✓';color:var(--ok)}
+.tabs button.on.ck::after{color:#fff}
+.chips{margin:0}
+.vid{max-width:880px;border-radius:20px;box-shadow:0 30px 80px -30px #000}
+.lnk{display:inline-block;margin:var(--s2) 0 0}
+.rd{display:grid;grid-template-columns:minmax(0,1fr)}
+.rd article{max-width:68ch}
+.rd section{scroll-margin-top:24px}
+.rd h2:first-child{margin-top:0}
+.rd section+section{margin-top:var(--s5)}
+dl{display:grid;gap:var(--s2);margin:0}
+dt{font-weight:600}
+dd{margin:0 0 var(--s2);color:var(--mu);padding-bottom:var(--s2);border-bottom:1px solid var(--ln)}
+.toc{display:none}
+@media(min-width:1100px){.rd{grid-template-columns:minmax(0,68ch) 200px;justify-content:space-between}.toc{display:flex;flex-direction:column;gap:10px;position:sticky;top:32px;align-self:start;font-size:14px;border-left:1px solid var(--ln);padding-left:var(--s2)}.toc a{color:var(--mu);cursor:pointer}.toc a:hover{color:var(--tx)}.toc b{font-size:22px}}
+pre{padding:var(--s3);border-radius:14px;line-height:1.7}
+.opts{display:grid;gap:12px;margin-bottom:var(--s3)}
+.opt{text-align:left;background:var(--code);border:1px solid var(--ln);color:var(--tx);border-radius:12px;padding:14px 18px;font:500 15px/1.5 Inter;cursor:pointer;transition:.2s}
+.opt:hover{border-color:var(--ac);transform:translateX(4px)}
+.opt.good{background:#34d39922;border-color:var(--ok)}
+.opt.bad{background:#f8717126;border-color:#f87171}
+.ok{color:var(--ok)}
+.nav{margin-top:var(--s5)}
+.btn,.btn2{padding:12px 22px;border-radius:12px}
+@media(max-width:899px){#top{margin-bottom:var(--s2)}}
+@media(max-width:720px){h2{font-size:28px}.tabs{width:100%}.tabs button{flex:1;padding:10px 6px}.hero{padding:var(--s3)}}
+@media(max-width:480px){main{padding:20px 16px 96px}.big{font-size:34px}.tabs button{font-size:13px}}
+</style>
+<style>
+.hero2{display:flex;justify-content:space-between;align-items:center;gap:var(--s4);padding:var(--s5) var(--s4);margin-bottom:var(--s3);border:1px solid var(--ln);border-radius:28px;background:radial-gradient(600px 300px at 90% 0,#4d8dff33,transparent),var(--pn);overflow:hidden}
+.hero2 h1{font-size:clamp(40px,6vw,72px);max-width:12ch;margin:8px 0 12px}
+.lead{font-family:var(--fd);font-size:28px;font-style:italic;color:var(--ac2);margin:0 0 var(--s2)}
+.rg{display:flex;flex-direction:column;align-items:center;gap:8px;flex:none}
+.rg svg{filter:drop-shadow(0 0 22px #4d8dff66)}
+.rg circle+circle{animation:draw 1.4s ease-out}
+@keyframes draw{from{stroke-dashoffset:164}}
+.path{list-style:none;padding:0;margin:var(--s3) 0 0;position:relative}
+.path::before{content:'';position:absolute;left:11px;top:8px;bottom:8px;width:2px;background:linear-gradient(var(--ac),var(--ln) 30%)}
+.path li{position:relative;padding:0 0 var(--s4) 52px}
+.path .nd{position:absolute;left:0;top:6px;width:24px;height:24px;border-radius:50%;background:var(--bg);border:2px solid var(--ln)}
+.path .done .nd{background:var(--ac);border-color:var(--ac)}
+.path .now .nd{border-color:var(--ac);box-shadow:0 0 0 6px #4d8dff2a,0 0 24px var(--ac)}
+.path h3{margin:0 0 12px}
+.path .soon{opacity:.5}
+.ls{display:flex;flex-wrap:wrap;gap:8px}
+.ls a{border:1px solid var(--ln);border-radius:99px;padding:6px 16px;font-size:14px;color:var(--mu);transition:.2s}
+.ls a:hover{border-color:var(--ac);color:var(--tx)}
+.ls a.dn{color:var(--ok);border-color:#34d39966}
+.code{position:relative}
+.cp{position:absolute;top:10px;right:10px;z-index:1;background:var(--pn);border:1px solid var(--ln);color:var(--mu);border-radius:8px;padding:4px 12px;font:500 12px Inter;cursor:pointer}
+.cp:hover{color:var(--tx);border-color:var(--ac)}
+.t-c{color:#6B7BA4;font-style:italic}.t-s{color:#9CE5B4}.t-k{color:#7AA7FF}.t-d{color:#E5C07B}.t-n{color:#F6A878}
+[data-theme=light] .t-c{color:#7C8AAE}[data-theme=light] .t-s{color:#0F8A4F}[data-theme=light] .t-k{color:#2F5BE0}[data-theme=light] .t-d{color:#A06A00}[data-theme=light] .t-n{color:#C2410C}
+@media(max-width:720px){.hero2{flex-direction:column;align-items:flex-start;padding:var(--s4) var(--s3)}}
+</style>
+<style>
+:root{--gold:#F2B45A}
+[data-theme=light]{--gold:#B7791F}
+body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background-image:linear-gradient(var(--ln) 1px,transparent 1px),linear-gradient(90deg,var(--ln) 1px,transparent 1px);background-size:56px 56px;opacity:.28;-webkit-mask-image:radial-gradient(ellipse at 75% 0,#000,transparent 70%);mask-image:radial-gradient(ellipse at 75% 0,#000,transparent 70%)}
+.view{animation:fade .3s ease}
+@keyframes fade{from{opacity:0}}
+.hero2 h1{background:linear-gradient(120deg,var(--tx) 35%,var(--ac2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{color:var(--gold)}
+.grid>.card:first-child .big{color:var(--gold)}
+dt{color:var(--gold)}
+#cd.ok{color:var(--gold);border-color:var(--gold);background:#f2b45a14}
+.bg.on{border-color:var(--gold);box-shadow:0 0 18px #f2b45a44}
+.path .done .nd{background:var(--gold);border-color:var(--gold);box-shadow:0 0 16px #f2b45a88}
+.toast{border-color:var(--gold);box-shadow:0 12px 44px #f2b45a55}
+.card{transition:transform .25s,border-color .25s,box-shadow .25s}
+.card:hover{transform:translateY(-2px);box-shadow:0 18px 40px -22px #4d8dff99}
+.btn{transition:transform .2s,box-shadow .2s}
+.btn:hover{transform:translateY(-2px);box-shadow:0 10px 30px #2f6bff88}
+.btn2,#side a{transition:.2s}
+#side a:hover{padding-left:20px}
+.tabs button:hover:not(.on){color:var(--tx);background:#4d8dff14}
+.hero2>*{animation:in .9s cubic-bezier(.2,.7,.2,1) both}
+.hero2>.rg{animation-delay:.18s}
+.grid>.card,.path li{animation:in .6s cubic-bezier(.2,.7,.2,1) both}
+.grid>.card:nth-child(2){animation-delay:.1s}.grid>.card:nth-child(3){animation-delay:.2s}.grid>.card:nth-child(4){animation-delay:.3s}
+.path li:nth-child(n+2){animation-delay:.08s}.path li:nth-child(n+4){animation-delay:.2s}.path li:nth-child(n+6){animation-delay:.3s}.path li:nth-child(n+8){animation-delay:.4s}.path li:nth-child(n+10){animation-delay:.5s}
+[data-theme=light] body{background:radial-gradient(900px 520px at 85% -10%,#2f6bff22,transparent),var(--bg)}
+[data-theme=light] .hero2{background:radial-gradient(600px 300px at 90% 0,#2f6bff22,transparent),var(--pn)}
+[data-theme=light] .card,[data-theme=light] .hero2{box-shadow:0 1px 2px #0e183010,0 12px 28px -16px #0e18302e}
+[data-theme=light] .card:hover{box-shadow:0 18px 40px -22px #2f6bff88}
+[data-theme=light] .vid{box-shadow:0 24px 60px -30px #0e183066}
+[data-theme=light] .tabs button.on,[data-theme=light] .btn{box-shadow:0 6px 18px #2f6bff44}
+[data-theme=light] .path .now .nd{box-shadow:0 0 0 6px #2f6bff22}
+[data-theme=light] #side.open{box-shadow:0 0 0 100vmax #0e183080}
+</style>
+</head>
+<body>
+<div id="app">
+<aside id="side"></aside>
+<main>
+<header id="top"><button class="ib" data-act="menu" aria-label="Menu">☰</button><span class="mu">PythonHub</span><button class="ib" data-act="theme" aria-label="Switch theme">◐</button></header>
+<div id="view" class="view"></div>
+</main>
+</div>
+<nav id="bnav"><a href="#/">⌂<span>Home</span></a><a href="#/roadmap">◈<span>Roadmap</span></a><a href="#/progress">◔<span>Progress</span></a></nav>
+<script>
+const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
+const L=[
+{id:'1-1',w:1,t:'Python setup, venv and pip',v:'Y21OR1OPC9A',
+s:'Every project should live in its own <b>virtual environment</b>: a private folder with its own packages, so projects never fight over versions. Create it with <code>venv</code>, install with <code>pip</code>, and record packages in <code>requirements.txt</code>.',
+d:'<p>Think of each robot having its own firmware: updating one never bricks another. Activation differs by system, and PowerShell may need <code>Set-ExecutionPolicy -Scope Process RemoteSigned</code> first.</p><p>Never commit <code>.venv</code> to Git. Commit <code>requirements.txt</code> and rebuild the environment anywhere.</p>',
+tm:[['Virtual environment','An isolated Python install with its own packages.'],['pip','Python’s package installer.'],['requirements.txt','The list of a project’s dependencies, used to rebuild its environment.'],['Dependency','A package your project needs in order to run.']],
+c:'python --version\npython -m venv .venv\n.venv\\Scripts\\activate        # Windows\nsource .venv/bin/activate     # macOS / Linux\npip install flask\npip freeze > requirements.txt\npip install -r requirements.txt',
+tk:[['Make a folder, create and activate a venv, install <code>requests</code>, and confirm it with <code>pip list</code>.','Your prompt shows <code>(.venv)</code> when the environment is active.','python -m venv .venv\n(activate it)\npip install requests\npip list'],['Save your packages to a file, delete the venv, then rebuild it from that file.','Look at the last line of the code sample above.','pip freeze > requirements.txt\n(delete .venv, create a new one, activate)\npip install -r requirements.txt']],
+q:[['What does a virtual environment isolate?',['A project’s packages','Your operating system','Your code editor'],0],['Which command creates one?',['pip install venv','python -m venv .venv','python --venv'],1],['What does <code>pip freeze > requirements.txt</code> do?',['Updates every package','Saves the installed package list to a file','Deletes unused packages'],1]]},
+{id:'1-2',w:1,t:'Functions I: parameters, return and scope',v:'Vh__2V2tXUM',
+s:'A function packages reusable logic: <code>def</code>, parameters in, <code>return</code> out. Variables created inside are <b>local</b>. Python looks names up in this order: local, enclosing, global, built-in (LEGB).',
+d:'<p>A function with no <code>return</code> gives back <code>None</code>. Assigning to a name inside a function creates a new local variable, even if a global shares the name.</p><p>Prefer returning values over changing globals; it keeps code easy to test.</p>',
+tm:[['Parameter vs argument','A parameter is the name in the definition; an argument is the value you pass in.'],['Return value','What a function hands back to its caller.'],['Scope','The region of code where a name is visible.'],['LEGB','The lookup order: Local, Enclosing, Global, Built-in.']],
+c:'def area(w, h):\n    return w * h\n\nx = 10\ndef show():\n    x = 5        # new local x; the global x is untouched\n    print(x)\n\nshow()\nprint(x)         # 10',
+tk:[['Write <code>is_even(n)</code> that returns <code>True</code> for even numbers.','Use the remainder operator.','def is_even(n):\n    return n % 2 == 0'],['Write <code>clamp(value, lo, hi)</code>, like limiting a motor’s speed to a safe range.','Combine <code>min</code> and <code>max</code>.','def clamp(value, lo, hi):\n    return max(lo, min(value, hi))']],
+q:[['What does a function without <code>return</code> give back?',['0','None','An error'],1],['What is the value you pass in when calling a function called?',['A parameter','An argument','A scope'],1],['Is a variable created inside a function visible outside it?',['Yes, always','No, it is local','Only if it is a number'],1]]},
+{id:'1-3',w:1,t:'Functions II: defaults, *args and **kwargs',v:'Vh__2V2tXUM',
+s:'Defaults make parameters optional. <code>*args</code> collects extra positional arguments into a tuple; <code>**kwargs</code> collects extra keyword arguments into a dict. Parameters after a bare <code>*</code> must be passed by name.',
+d:'<p>Classic trap: <code>def add(x, items=[])</code> reuses the <em>same</em> list on every call. Default to <code>None</code> and create the list inside.</p><p>You will meet <code>**kwargs</code> constantly in Flask and its extensions.</p>',
+tm:[['Default argument','A value used when the caller leaves a parameter out.'],['*args','All extra positional arguments, as a tuple.'],['**kwargs','All extra keyword arguments, as a dict.'],['Keyword-only argument','A parameter that must be passed as name=value.']],
+c:'def log(msg, level="INFO"):\n    print(f"[{level}] {msg}")\n\ndef total(*args):        # args is a tuple\n    return sum(args)\n\ndef build(**kwargs):     # kwargs is a dict\n    return kwargs\n\ndef move(speed, *, safe=True):\n    ...\n\nbuild(a=1, b=2)          # {"a": 1, "b": 2}',
+tk:[['Write <code>mean(*nums)</code> that returns the average of any number of values.','<code>sum</code> and <code>len</code> work on tuples.','def mean(*nums):\n    return sum(nums) / len(nums)'],['Write <code>make_robot(name, **options)</code> returning a dict with defaults that options can override.','Build the defaults dict first, then <code>update</code> it.','def make_robot(name, **options):\n    robot = {"name": name, "speed": 1, "mode": "safe"}\n    robot.update(options)\n    return robot']],
+q:[['What type is <code>*args</code> inside the function?',['list','tuple','dict'],1],['What type is <code>**kwargs</code>?',['dict','tuple','set'],0],['Safest default for a parameter that should start as an empty list?',['[]','None','0'],1]]},
+{id:'1-4',w:1,t:'Functions as values and closures',v:'tNSOaA1z6Uo',
+s:'Functions are values: store them, pass them, return them. A <b>closure</b> is an inner function that remembers variables from the function that created it, even after that function has finished.',
+d:'<p>To rebind (not just read) an enclosed variable, declare it <code>nonlocal</code>. Analogy: a calibration function that remembers its own sensor offset.</p><p>Closures are what make decorators work, so be sure this lesson is solid.</p>',
+tm:[['First-class function','A function that can be used like any other value.'],['Closure','An inner function that keeps access to its enclosing variables.'],['Free variable','A variable used in a function but defined in an enclosing scope.'],['nonlocal','Lets an inner function reassign an enclosing variable.']],
+c:'def make_multiplier(n):\n    def times(x):\n        return x * n     # n is remembered\n    return times\n\ndouble = make_multiplier(2)\nprint(double(5))         # 10',
+tk:[['Write <code>make_counter()</code> returning a function that returns 1, 2, 3 on successive calls.','You need <code>nonlocal</code>.','def make_counter():\n    n = 0\n    def inc():\n        nonlocal n\n        n += 1\n        return n\n    return inc'],['Write <code>make_threshold(limit)</code> returning a function that says whether a sensor reading exceeds the limit.','Return a function (or a lambda) that compares to <code>limit</code>.','def make_threshold(limit):\n    return lambda reading: reading > limit']],
+q:[['What does a closure remember?',['Variables from its enclosing function','Every global variable','Nothing'],0],['Which keyword lets an inner function reassign an enclosing variable?',['global','nonlocal','static'],1],['Can a function be passed as an argument to another function?',['Yes','No','Only built-in ones'],0]]},
+{id:'1-5',w:1,t:'Decorators and a timing project',v:'U-G-mSd4KAE',
+s:'A <b>decorator</b> is a function that takes a function and returns an improved one. Writing <code>@timer</code> above a definition is shorthand for <code>slow = timer(slow)</code>.',
+d:'<p>Use <code>*args, **kwargs</code> in the wrapper so it accepts any signature, and <code>functools.wraps</code> to keep the original name and docstring.</p><p>Flask’s <code>@app.route("/")</code> is a decorator that registers your function as a URL handler. This lesson is your doorway to Flask.</p>',
+tm:[['Decorator','A function that wraps another function to add behavior.'],['Wrapper','The inner function that runs around the original.'],['@ syntax','Shorthand for reassigning a name to the decorated function.'],['functools.wraps','Copies the original function’s name and docstring onto the wrapper.']],
+c:'import time, functools\n\ndef timer(func):\n    @functools.wraps(func)\n    def wrapper(*args, **kwargs):\n        start = time.perf_counter()\n        result = func(*args, **kwargs)\n        print(f"{func.__name__} took {time.perf_counter() - start:.4f}s")\n        return result\n    return wrapper\n\n@timer\ndef slow():\n    time.sleep(0.2)\n\nslow()',
+tk:[['Write <code>@logged</code> that prints the function name and its arguments before calling it.','Copy the shape of <code>timer</code> and print inside the wrapper.','def logged(f):\n    def w(*a, **k):\n        print(f.__name__, a, k)\n        return f(*a, **k)\n    return w'],['Write <code>@repeat(3)</code>, a decorator that takes an argument and runs the function that many times.','You need one more layer: a function that returns the decorator.','def repeat(n):\n    def deco(f):\n        def w(*a, **k):\n            for _ in range(n):\n                r = f(*a, **k)\n            return r\n        return w\n    return deco']],
+q:[['<code>@timer</code> above <code>def slow()</code> is equivalent to:',['slow = timer(slow)','timer = slow(timer)','slow() = timer'],0],['Why does the wrapper take <code>*args, **kwargs</code>?',['To accept any arguments the function has','To make it faster','It is required by Python'],0],['What does <code>functools.wraps</code> preserve?',['The return value','The original name and docstring','The execution time'],1]]}
+];
+const K='pythonhub-v1';let S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
+S=Object.assign({done:{},quiz:{},score:{},watched:{},time:{},log:{},days:{},theme:'dark',last:null},S||{});
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+const ds=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),today=()=>ds(new Date()),nd=()=>Object.keys(S.done).length;
+function streak(){let n=0,m=0,d=new Date();for(let i=0;i<400;i++){if(S.days[ds(d)]){n++;m=0}else if(++m>=2)break;d.setDate(d.getDate()-1)}return n}
+function weekSecs(){const d=new Date(),k=(d.getDay()+6)%7;let t=0;for(let i=0;i<=k;i++){t+=S.log[ds(d)]||0;d.setDate(d.getDate()-1)}return t}
+function ring(p,z){const c=2*Math.PI*26;return `<svg width="${z}" height="${z}" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--ln)" stroke-width="6"/><circle cx="32" cy="32" r="26" fill="none" stroke="var(--ac)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c*p} ${c}" transform="rotate(-90 32 32)" style="filter:drop-shadow(0 0 4px var(--ac))"/><text x="32" y="37" text-anchor="middle" fill="var(--tx)" font-size="14" font-weight="600">${Math.round(p*100)}%</text></svg>`}
+const stat=(k,v)=>`<div class="card"><div class="mu">${k}</div><div class="big">${v}</div></div>`;
+function home(){const nx=L.find(l=>!S.done[l.id]),cur=L.find(l=>l.id===S.last&&!S.done[l.id])||nx,sk=streak();
+return `<section class="hero2"><div><div class="mu">${S.last?'Welcome back':'Welcome to PythonHub'}</div><h1>${cur?(S.last?'Pick up where you left off':'Start your first lesson'):'Week 1 is complete'}</h1>${cur?`<p class="lead">${cur.t}</p><a class="btn" href="#/l/${cur.id}">${S.last?'Continue learning':'Start learning'}</a>`:'<p class="lead">Week 2 is on its way.</p>'}</div><div class="rg">${ring(nd()/60,150)}<span class="mu">${nd()} of 60 lessons</span></div></section>
+<div class="grid">${stat('Streak',sk+(sk==1?' day':' days'))}${stat('This week',(weekSecs()/3600).toFixed(1)+' / 5 h')}${stat('Lessons done',nd()+' / 60')}${stat('Videos watched',Object.keys(S.watched).length)}</div><h2>Your path</h2>${road()}`}
+const road=()=>{const cw=(L.find(l=>!S.done[l.id])||{w:2}).w;return `<ol class="path">${W.map((t,i)=>{const ls=L.filter(l=>l.w==i+1),dn=ls.filter(l=>S.done[l.id]).length,st=ls.length&&dn==5?'done':i+1==cw?'now':'';return `<li class="${st}${ls.length?'':' soon'}"><span class="nd"></span><div class="mu">Week ${i+1}</div><h3>${t}</h3>${ls.length?`<div class="ls">${ls.map(l=>`<a href="#/l/${l.id}" class="${S.done[l.id]?'dn':''}">${S.done[l.id]?'✓':'○'} ${l.t}</a>`).join('')}</div>`:'<p class="mu">Coming soon</p>'}</li>`}).join('')}</ol>`};
+function hl(c){const re=/(#.*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(def|return|import|from|class|if|elif|else|for|in|while|with|as|nonlocal|global|lambda|None|True|False|print|try|except|raise|pass)\b|(@\w+)|\b(\d+\.?\d*)\b/g;let o='',i=0,m;
+while(m=re.exec(c)){o+=esc(c.slice(i,m.index));const k=m[1]?'c':m[2]?'s':m[3]?'k':m[4]?'d':'n';o+=`<span class="t-${k}">${esc(m[0])}</span>`;i=re.lastIndex}return o+esc(c.slice(i))}
+const cb=c=>`<div class="code"><button class="cp" data-act="copy">Copy</button><pre>${hl(c)}</pre></div>`;
+function prog(){const s=new Date();s.setDate(s.getDate()-((s.getDay()+6)%7)-77);const t=today();let c='';
+for(let i=0;i<84;i++){const k=ds(s),m=(S.log[k]||0)/60,lv=!m?0:m<10?1:m<30?2:m<60?3:4;c+=`<i class="h${lv}${k>t?' f':''}" title="${k}: ${Math.round(m)} min"></i>`;s.setDate(s.getDate()+1)}
+const bs=[['First lesson',nd()>0],['Week 1 complete',L.every(l=>S.done[l.id])],['3-day streak',streak()>=3],['7-day streak',streak()>=7],['5 hours in a week',weekSecs()>=18000]];
+return `<h1>Progress</h1><div class="card"><b>Study time</b> <span class="mu">last 12 weeks</span><div class="heat">${c}</div></div><h2>Badges</h2><div class="bd">${bs.map(b=>`<span class="bg ${b[1]?'on':''}">${b[1]?'★':'☆'} ${b[0]}</span>`).join('')}</div><h2>Lessons</h2><div class="card">${L.map(l=>`<div class="row"><span>${S.done[l.id]?'✓':'○'} ${l.t}</span><span class="mu">${Math.round((S.time[l.id]||0)/60)} min · quiz ${S.score[l.id]!=null?S.score[l.id]+'%':'not taken'}</span></div>`).join('')}</div>`}
+let qs={i:0,ok:0,k:null};
+function lesson(l){S.last=l.id;save();const i=L.indexOf(l),p=L[i-1],n=L[i+1];
+return `<div class="mu">Week ${l.w}, lesson ${i+1} of 5</div><h1>${l.t}</h1><div class="chips"><span class="chip" id="cv"></span><span class="chip" id="cq"></span><span class="chip" id="cd"></span></div>
+<div class="tabs">${[['watch','Watch'],['read','Read'],['practice','Practice'],['quiz','Quiz']].map(t=>`<button data-act="tab" data-t="${t[0]}" id="t-${t[0]}">${t[1]}</button>`).join('')}</div><div id="tp"></div>
+<div class="nav">${p?`<a class="btn2" href="#/l/${p.id}">Previous: ${p.t}</a>`:'<span></span>'}${n?`<a class="btn2" href="#/l/${n.id}">Next: ${n.t}</a>`:'<span></span>'}</div>`}
+function panel(l,t){
+if(t=='watch')return `<div class="vid"><div id="pl"></div></div><a class="lnk" data-act="watched" data-v="${l.v}">Video not tracking? Mark as watched</a>`;
+if(t=='read')return `<div class="rd"><article><section id="s-sum"><h2>Summary</h2><p>${l.s}</p><details><summary>Go deeper</summary>${l.d}</details></section><section id="s-terms"><h2>Key terms</h2><dl>${l.tm.map(x=>`<dt>${x[0]}</dt><dd>${x[1]}</dd>`).join('')}</dl></section><section id="s-code"><h2>Code</h2>${cb(l.c)}</section></article><aside class="toc"><b>On this page</b><a data-act="jump" data-t="s-sum">Summary</a><a data-act="jump" data-t="s-terms">Key terms</a><a data-act="jump" data-t="s-code">Code</a></aside></div>`;
+if(t=='practice')return `<p class="mu">Solve these in your own editor with AI off. Open the hint only after you have tried.</p>${l.tk.map((x,j)=>`<div class="card"><h3>Task ${j+1}</h3><p>${x[0]}</p><details><summary>Hint</summary><p>${x[1]}</p></details><details><summary>Solution</summary>${cb(x[2])}</details></div>`).join('')}`;
+return quizHtml(l)}
+function quizHtml(l){const n=l.q.length,nx=L[L.indexOf(l)+1];
+if(qs.i>=n){const pc=Math.round(qs.ok/n*100),pass=pc>=70;return `<div class="card"><h3>${pass?'Quiz passed':'Not quite yet'}</h3><p>${qs.ok} of ${n} correct (${pc}%). ${pass?'':'You need 70% to pass. Review the notes and try again.'}</p>${pass?(nx?`<a class="btn" href="#/l/${nx.id}">Next lesson</a>`:''):'<button class="btn" data-act="retry">Try again</button>'}</div>`}
+const q=l.q[qs.i],a=qs.k!=null;
+return `<div class="card"><div class="mu">Question ${qs.i+1} of ${n}</div><h3>${q[0]}</h3><div class="opts">${q[1].map((o,k)=>`<button class="opt ${a?(k==q[2]?'good':k==qs.k?'bad':''):''}" data-act="pick" data-k="${k}">${o}</button>`).join('')}</div>${a?`<p class="${qs.k==q[2]?'ok':'mu'}">${qs.k==q[2]?'Correct.':'The answer is: '+q[1][q[2]]}</p><button class="btn" data-act="next">${qs.i+1<n?'Next question':'See result'}</button>`:''}</div>`}
+function setTab(t){const l=cur();if(!l)return;try{yt&&yt.destroy&&yt.destroy()}catch(e){}yt=null;clearInterval(poll);if(t=='quiz')qs={i:0,ok:0,k:null};
+const tp=$('#tp');tp.className='';void tp.offsetWidth;tp.className='view';tp.innerHTML=panel(l,t);document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));if(t=='watch')mount(l.v);status()}
+function side(){const h=location.hash,cw=(L.find(l=>'#/l/'+l.id==h)||L[0]).w;let o='<div class="brand"><img src="favicon.svg" width="30" height="30" alt=""><span>PythonHub</span></div>';
+W.forEach((t,i)=>{const ls=L.filter(l=>l.w==i+1),dn=ls.filter(l=>S.done[l.id]).length;
+if(!ls.length){o+=`<div class="wk soon"><span>Week ${i+1}</span><em>${t}</em><small>Soon</small></div>`;return}
+o+=`<details class="wk" ${i+1==cw?'open':''}><summary><span>Week ${i+1}</span><em>${t}</em><small>${dn}/5</small></summary>${ls.map(l=>`<a href="#/l/${l.id}" class="${S.done[l.id]?'dn':''} ${h=='#/l/'+l.id?'on':''}">${S.done[l.id]?'✓':'○'} ${l.t}</a>`).join('')}</details>`});
+$('#side').innerHTML=o+'<div class="tools"><button class="gh" data-act="theme">Switch theme</button><button class="gh" data-act="export">Export progress</button><label class="gh">Import progress<input type="file" id="im" accept=".json" hidden></label></div>'}
+let curId=null,yt=null,poll=null;const cur=()=>L.find(l=>l.id===curId);
+function tryComplete(l){if(!S.done[l.id]&&S.watched[l.v]&&S.quiz[l.id]){S.done[l.id]=1;S.days[today()]=(S.days[today()]||0)+1;save();side();celebrate();toast('Lesson complete')}}
+function status(){const l=cur();if(!l)return;tryComplete(l);const f=(id,ok,t)=>{const e=$(id);if(e){e.className='chip'+(ok?' ok':'');e.textContent=(ok?'✓ ':'○ ')+t}};f('#cv',S.watched[l.v],'Video watched');f('#cq',S.quiz[l.id],'Quiz passed');f('#cd',S.done[l.id],'Lesson complete');const a=$('#t-watch'),b=$('#t-quiz');a&&a.classList.toggle('ck',!!S.watched[l.v]);b&&b.classList.toggle('ck',!!S.quiz[l.id])}
+function mount(v){const go=()=>{if(!$('#pl'))return;yt=new YT.Player('pl',{videoId:v,playerVars:{rel:0},events:{onStateChange:e=>{clearInterval(poll);if(e.data===1)poll=setInterval(()=>{const d=yt.getDuration();if(d>0&&yt.getCurrentTime()/d>=.9){clearInterval(poll);S.watched[v]=1;save();status()}},2000)}}})};window.YT&&YT.Player?go():window.onYouTubeIframeAPIReady=go}
+function celebrate(){for(let i=0;i<32;i++){const e=document.createElement('b');e.className='cf';e.style.cssText=`left:${Math.random()*100}vw;background:${['#4D8DFF','#8FD0FF','#F2B45A','#FFE0A3'][Math.random()*4|0]};animation-delay:${Math.random()*.4}s`;document.body.appendChild(e);setTimeout(()=>e.remove(),2400)}}
+function toast(m){const e=document.createElement('div');e.className='toast';e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2600)}
+function route(){const h=location.hash.slice(1)||'/',v=$('#view'),m=h.match(/^\/l\/(.+)$/);try{yt&&yt.destroy&&yt.destroy()}catch(e){}yt=null;clearInterval(poll);curId=null;
+v.className='';void v.offsetWidth;v.className='view';
+const l=m&&L.find(x=>x.id===m[1]);
+if(l){curId=l.id;v.innerHTML=lesson(l);setTab('watch')}else v.innerHTML=h=='/roadmap'?'<h1>Roadmap</h1>'+road():h=='/progress'?prog():home();
+side();document.querySelectorAll('#bnav a').forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+h));$('#side').classList.remove('open');scrollTo(0,0)}
+document.addEventListener('click',e=>{const a=e.target.closest('[data-act]');if(!a)return;const t=a.dataset.act;
+if(t=='theme'){S.theme=S.theme=='dark'?'light':'dark';document.documentElement.dataset.theme=S.theme;save()}
+else if(t=='menu'){innerWidth<900?$('#side').classList.toggle('open'):document.body.classList.toggle('collapsed')}
+else if(t=='export'){const b=document.createElement('a');b.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));b.download='pythonhub-progress.json';b.click()}
+else if(t=='tab')setTab(a.dataset.t);
+else if(t=='copy'){const c=a.nextElementSibling.textContent;navigator.clipboard&&navigator.clipboard.writeText(c).then(()=>{a.textContent='Copied';setTimeout(()=>a.textContent='Copy',1500)})}
+else if(t=='pick'){if(qs.k==null){const l=cur(),q=l.q[qs.i];qs.k=+a.dataset.k;if(qs.k==q[2])qs.ok++;$('#tp').innerHTML=quizHtml(l)}}
+else if(t=='next'){const l=cur();qs.i++;qs.k=null;if(qs.i>=l.q.length){const pc=Math.round(qs.ok/l.q.length*100);S.score[l.id]=Math.max(S.score[l.id]||0,pc);if(pc>=70)S.quiz[l.id]=1;save();status()}$('#tp').innerHTML=quizHtml(l)}
+else if(t=='retry'){qs={i:0,ok:0,k:null};$('#tp').innerHTML=quizHtml(cur())}
+else if(t=='jump')document.getElementById(a.dataset.t).scrollIntoView({behavior:'smooth',block:'start'})
+else if(t=='watched'){S.watched[a.dataset.v]=1;save();status()}});
+document.addEventListener('change',e=>{if(e.target.id=='im'){const f=e.target.files[0];f&&f.text().then(x=>{try{Object.assign(S,JSON.parse(x));save();route();toast('Progress imported')}catch(err){alert('That file is not a valid PythonHub export.')}})}});
+let tick=0;setInterval(()=>{if(curId&&!document.hidden){S.time[curId]=(S.time[curId]||0)+1;S.log[today()]=(S.log[today()]||0)+1;if(++tick%15==0)save()}},1000);
+window.addEventListener('hashchange',route);document.documentElement.dataset.theme=S.theme;route();
+const ys=document.createElement('script');ys.src='https://www.youtube.com/iframe_api';document.head.appendChild(ys);
+</script>
+</body>
+</html>
