@@ -260,6 +260,7 @@ dt{color:var(--gold)}
 .vl button{width:100%;text-align:left;background:var(--pn);border:1px solid var(--ln);color:var(--tx);border-radius:12px;padding:12px 16px;font:500 14px Inter,sans-serif;cursor:pointer;transition:.2s}
 .vl button:hover{border-color:var(--ac);transform:translateX(4px)}
 </style>
+<style>.vl button.ck::after{content:" ✓";color:var(--ok)}.lnk+.lnk{margin-left:var(--s3)}</style>
 </head>
 <body>
 <div id="app">
@@ -388,7 +389,7 @@ return `<div class="mu">Week ${l.w}, lesson ${L.filter(x=>x.w==l.w).indexOf(l)+1
 <div class="nav">${p?`<a class="btn2" href="#/l/${p.id}">Previous: ${p.t}</a>`:'<span></span>'}${n?`<a class="btn2" href="#/l/${n.id}">Next: ${n.t}</a>`:'<span></span>'}</div>`}
 function panel(l,t){
 if(t=='watch'&&l.nv)return '<div class="card"><h3>This lesson is read-first</h3><p class="mu">There is no video for this one. Work through the notes on the Read tab.</p><button class="btn" data-act="tab" data-t="read">Start reading</button></div>';
-if(t=='watch')return `<div class="vid"><div id="pl"></div></div>${vl(l)}<a class="lnk" data-act="watched" data-v="${l.v}">Video not tracking? Mark as watched</a>`;
+if(t=='watch')return `<div class="vid"><div id="pl"></div></div>${vl(l)}<a class="lnk" id="yl" target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=${l.v}">Open on YouTube</a><a class="lnk" data-act="watched">Video not tracking? Mark as watched</a>`;
 if(t=='read')return `<div class="rd"><article><section id="s-sum"><h2>Summary</h2><p>${l.s}</p><details><summary>Go deeper</summary>${l.d}</details></section><section id="s-terms"><h2>Key terms</h2><dl>${l.tm.map(x=>`<dt>${x[0]}</dt><dd>${x[1]}</dd>`).join('')}</dl></section><section id="s-code"><h2>Code</h2>${cb(l.c)}</section></article><aside class="toc"><b>On this page</b><a data-act="jump" data-t="s-sum">Summary</a><a data-act="jump" data-t="s-terms">Key terms</a><a data-act="jump" data-t="s-code">Code</a></aside></div>`;
 if(t=='practice')return `<p class="mu">Solve these in your own editor with AI off. Open the hint only after you have tried.</p>${l.tk.map((x,j)=>`<div class="card"><h3>Task ${j+1}</h3><p>${x[0]}</p><details><summary>Hint</summary><p>${x[1]}</p></details><details><summary>Solution</summary>${cb(x[2])}</details></div>`).join('')}`;
 return quizHtml(l)}
@@ -404,11 +405,16 @@ if(!ls.length){o+=`<div class="wk soon"><span>Week ${i+1}</span><em>${t}</em><sm
 o+=`<details class="wk" ${i+1==cw?'open':''}><summary><span>Week ${i+1}</span><em>${t}</em><small>${dn}/5</small></summary>${ls.map(l=>`<a href="#/l/${l.id}" class="${S.done[l.id]?'dn':''} ${h=='#/l/'+l.id?'on':''}">${S.done[l.id]?'✓':'○'} ${l.t}</a>`).join('')}</details>`});
 $('#side').innerHTML=o+'<div class="tools"><button class="gh" data-act="theme">Switch theme</button><button class="gh" data-act="export">Export progress</button><label class="gh">Import progress<input type="file" id="im" accept=".json" hidden></label></div>'}
 let curId=null,yt=null,poll=null;const cur=()=>L.find(l=>l.id===curId);
-function tryComplete(l){if(!S.done[l.id]&&(l.nv||S.watched[l.v])&&S.quiz[l.id]){S.done[l.id]=1;S.days[today()]=(S.days[today()]||0)+1;save();side();celebrate();toast('Lesson complete')}}
-function status(){const l=cur();if(!l)return;tryComplete(l);const f=(id,ok,t)=>{const e=$(id);if(e){e.className='chip'+(ok?' ok':'');e.textContent=(ok?'✓ ':'○ ')+t}};f('#cv',l.nv||S.watched[l.v],l.nv?'No video needed':'Video watched');f('#cq',S.quiz[l.id],'Quiz passed');f('#cd',S.done[l.id],'Lesson complete');const a=$('#t-watch'),b=$('#t-quiz');a&&a.classList.toggle('ck',!!(l.nv||S.watched[l.v]));b&&b.classList.toggle('ck',!!S.quiz[l.id])}
+function tryComplete(l){if(!S.done[l.id]&&wd(l)&&S.quiz[l.id]){S.done[l.id]=1;S.days[today()]=(S.days[today()]||0)+1;save();side();celebrate();toast('Lesson complete')}}
+function status(){const l=cur();if(!l)return;tryComplete(l);const f=(id,ok,t)=>{const e=$(id);if(e){e.className='chip'+(ok?' ok':'');e.textContent=(ok?'✓ ':'○ ')+t}};f('#cv',wd(l),l.nv?'No video needed':'Video watched');f('#cq',S.quiz[l.id],'Quiz passed');f('#cd',S.done[l.id],'Lesson complete');const a=$('#t-watch'),b=$('#t-quiz');a&&a.classList.toggle('ck',!!wd(l));document.querySelectorAll('.vl button').forEach((x,i)=>x.classList.toggle('ck',!!S.watched[vids(l)[i]]));b&&b.classList.toggle('ck',!!S.quiz[l.id])}
 const vl=l=>l.vt?`<ol class="vl">${l.vt.map((t,i)=>`<li><button data-act="pv" data-i="${i}">${i+1}. ${t}</button></li>`).join('')}</ol>`:'';
-function mount(l){const go=()=>{if(!$('#pl'))return;const m=l.pl||l.more,o=l.pl?{playerVars:{rel:0,listType:'playlist',list:l.pl,index:l.i}}:{videoId:l.v,playerVars:l.more?{rel:0,playlist:l.more}:{rel:0}};
-yt=new YT.Player('pl',{...o,events:{onStateChange:e=>{clearInterval(poll);if(e.data===1)poll=setInterval(()=>{const d=yt.getDuration();if(d>0&&yt.getCurrentTime()/d>=.9&&(!m||yt.getPlaylistIndex()>=l.e)){clearInterval(poll);S.watched[l.v]=1;save();status()}},2000)}}})};window.YT&&YT.Player?go():window.onYouTubeIframeAPIReady=go}
+const vids=l=>[l.v].concat(l.more?l.more.split(','):[]),wd=l=>l.nv||vids(l).every(x=>S.watched[x]);let cv=null;
+function play(id){cv=id;try{yt.loadVideoById(id)}catch(x){}const y=$('#yl');if(y)y.href='https://www.youtube.com/watch?v='+id}
+function mount(l){const ids=vids(l),go=()=>{if(!$('#pl'))return;cv=ids[0];
+yt=new YT.Player('pl',{videoId:ids[0],playerVars:{rel:0},events:{onError:()=>toast('This video would not play here. Use Open on YouTube.'),onStateChange:e=>{clearInterval(poll);
+if(e.data===1)poll=setInterval(()=>{try{const d=yt.getDuration();if(d>0&&yt.getCurrentTime()/d>=.9){clearInterval(poll);S.watched[cv]=1;save();status()}}catch(x){}},2000);
+if(e.data===0){S.watched[cv]=1;save();status();const k=ids.indexOf(cv);if(k>=0&&k<ids.length-1)play(ids[k+1])}}}})};
+window.YT&&YT.Player?go():window.onYouTubeIframeAPIReady=go}
 function celebrate(){for(let i=0;i<32;i++){const e=document.createElement('b');e.className='cf';e.style.cssText=`left:${Math.random()*100}vw;background:${['#4D8DFF','#8FD0FF','#F2B45A','#FFE0A3'][Math.random()*4|0]};animation-delay:${Math.random()*.4}s`;document.body.appendChild(e);setTimeout(()=>e.remove(),2400)}}
 function toast(m){const e=document.createElement('div');e.className='toast';e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2600)}
 function route(){const h=location.hash.slice(1)||'/',v=$('#view'),m=h.match(/^\/l\/(.+)$/);try{yt&&yt.destroy&&yt.destroy()}catch(e){}yt=null;clearInterval(poll);curId=null;
@@ -431,9 +437,9 @@ else if(t=='rate'){const c=deck()[0],lv=S.fc[c.t]||0;S.fc[c.t]=+a.dataset.r?Math
 else if(t=='rpick'){if(rv.k==null){const x=missed()[0];rv.k=+a.dataset.k;rv.ok=rv.k==x.q[2];paint()}}
 else if(t=='rnext'){const x=missed()[0];delete S.miss[x.key];if(!rv.ok)S.miss[x.key]=1;rv={k:null,ok:0};save();paint()}
 else if(t=='bk'){const id=cur().id;S.bk[id]=!S.bk[id];if(!S.bk[id])delete S.bk[id];save();a.classList.toggle('on',!!S.bk[id]);a.querySelector('span').textContent=S.bk[id]?'Saved':'Save lesson'}
-else if(t=='pv'){yt&&yt.playVideoAt&&yt.playVideoAt(+a.dataset.i)}
+else if(t=='pv'){play(vids(cur())[+a.dataset.i])}
 else if(t=='jump')document.getElementById(a.dataset.t).scrollIntoView({behavior:'smooth',block:'start'})
-else if(t=='watched'){S.watched[a.dataset.v]=1;save();status()}});
+else if(t=='watched'){vids(cur()).forEach(x=>S.watched[x]=1);save();status()}});
 document.addEventListener('change',e=>{if(e.target.id=='im'){const f=e.target.files[0];f&&f.text().then(x=>{try{Object.assign(S,JSON.parse(x));save();route();toast('Progress imported')}catch(err){alert('That file is not a valid PythonHub export.')}})}});
 let tick=0;setInterval(()=>{if(curId&&!document.hidden){S.time[curId]=(S.time[curId]||0)+1;S.log[today()]=(S.log[today()]||0)+1;if(++tick%15==0)save()}},1000);
 window.addEventListener('hashchange',route);document.documentElement.dataset.theme=S.theme;chrome();route();
