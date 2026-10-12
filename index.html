@@ -221,16 +221,50 @@ dt{color:var(--gold)}
 [data-theme=light] .path .now .nd{box-shadow:0 0 0 6px #2f6bff22}
 [data-theme=light] #side.open{box-shadow:0 0 0 100vmax #0e183080}
 </style>
+<style>
+.ib{display:grid;place-items:center}
+.ib svg,#bnav svg,.sn svg,.bk svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+#bnav a{font-size:11px;line-height:1.2;gap:4px;padding:6px 0;transition:color .2s}
+#bnav a.on svg{filter:drop-shadow(0 0 6px var(--ac))}
+#side a.brand{padding:0;margin:0 8px var(--s3);border:0;color:var(--tx);background:none}
+#side a.brand:hover{padding-left:0}
+.sn{display:grid;gap:2px;margin-bottom:var(--s3)}
+#side .sn a{display:flex;align-items:center;gap:12px;margin:0;padding:10px 12px;border:0;border-radius:10px}
+#side .sn a:hover{padding-left:12px;background:#4d8dff14}
+#side .sn a.on{background:#4d8dff1f;color:var(--ac2)}
+#sw{position:relative;flex:1;max-width:460px;margin:0 12px}
+#sq{width:100%;background:var(--pn);border:1px solid var(--ln);border-radius:12px;padding:10px 16px;color:var(--tx);font:15px Inter,sans-serif;transition:border-color .2s}
+#sq:focus{outline:0;border-color:var(--ac);box-shadow:0 0 0 4px #4d8dff22}
+#sr{display:none;position:absolute;left:0;right:0;top:calc(100% + 8px);background:var(--pn);border:1px solid var(--ln);border-radius:14px;padding:8px;z-index:25;box-shadow:0 24px 50px -20px #000}
+#sr.on{display:block}
+#sr a{display:flex;flex-direction:column;padding:10px 12px;border-radius:10px;line-height:1.4}
+#sr a:hover{background:#4d8dff1f}
+#sr span,#sr p{font-size:13px;padding:0 4px}
+.bk{display:inline-flex;align-items:center;gap:8px;margin-right:auto;padding:6px 14px;border-radius:99px;font-size:13px}
+.bk svg{width:16px;height:16px}
+.bk.on{color:var(--gold);border-color:var(--gold)}
+.bk.on svg{fill:var(--gold)}
+.lk{display:block;font-size:13px;color:var(--ac2)}
+.fcard{display:flex;flex-direction:column;justify-content:space-between;align-items:center;text-align:center;gap:var(--s3);min-height:300px;max-width:560px;padding:var(--s4);border:1px solid var(--ln);border-radius:24px;background:radial-gradient(400px 200px at 50% 0,#4d8dff26,transparent),var(--pn);cursor:pointer;transition:border-color .3s}
+.fcard.flip{border-color:var(--gold)}
+.ft{font-family:var(--fd);font-size:clamp(30px,5vw,44px);line-height:1.2;font-weight:600;animation:fade .35s}
+.fcard.flip .ft{font-family:Inter,sans-serif;font-size:19px;font-weight:400;line-height:1.6}
+.r2{display:flex;gap:12px;margin-top:var(--s3)}
+.r2 .btn,.r2 .gh{margin:0;padding:12px 28px}
+.ls.col{flex-direction:column;max-width:560px}
+.ls.col a{border-radius:14px;padding:14px 18px;font-size:16px;color:var(--tx)}
+@media(max-width:480px){#sw{margin:0 8px}}
+</style>
 </head>
 <body>
 <div id="app">
 <aside id="side"></aside>
 <main>
-<header id="top"><button class="ib" data-act="menu" aria-label="Menu">☰</button><span class="mu">PythonHub</span><button class="ib" data-act="theme" aria-label="Switch theme">◐</button></header>
+<header id="top"><button class="ib" data-act="menu" aria-label="Menu"></button><div id="sw"><input id="sq" type="search" placeholder="Search lessons, terms and tasks" autocomplete="off" aria-label="Search"><div id="sr"></div></div><button class="ib" data-act="theme" aria-label="Switch theme"></button></header>
 <div id="view" class="view"></div>
 </main>
 </div>
-<nav id="bnav"><a href="#/">⌂<span>Home</span></a><a href="#/roadmap">◈<span>Roadmap</span></a><a href="#/progress">◔<span>Progress</span></a></nav>
+<nav id="bnav"></nav>
 <script>
 const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
@@ -269,11 +303,46 @@ d:'<p>Use <code>*args, **kwargs</code> in the wrapper so it accepts any signatur
 tm:[['Decorator','A function that wraps another function to add behavior.'],['Wrapper','The inner function that runs around the original.'],['@ syntax','Shorthand for reassigning a name to the decorated function.'],['functools.wraps','Copies the original function’s name and docstring onto the wrapper.']],
 c:'import time, functools\n\ndef timer(func):\n    @functools.wraps(func)\n    def wrapper(*args, **kwargs):\n        start = time.perf_counter()\n        result = func(*args, **kwargs)\n        print(f"{func.__name__} took {time.perf_counter() - start:.4f}s")\n        return result\n    return wrapper\n\n@timer\ndef slow():\n    time.sleep(0.2)\n\nslow()',
 tk:[['Write <code>@logged</code> that prints the function name and its arguments before calling it.','Copy the shape of <code>timer</code> and print inside the wrapper.','def logged(f):\n    def w(*a, **k):\n        print(f.__name__, a, k)\n        return f(*a, **k)\n    return w'],['Write <code>@repeat(3)</code>, a decorator that takes an argument and runs the function that many times.','You need one more layer: a function that returns the decorator.','def repeat(n):\n    def deco(f):\n        def w(*a, **k):\n            for _ in range(n):\n                r = f(*a, **k)\n            return r\n        return w\n    return deco']],
-q:[['<code>@timer</code> above <code>def slow()</code> is equivalent to:',['slow = timer(slow)','timer = slow(timer)','slow() = timer'],0],['Why does the wrapper take <code>*args, **kwargs</code>?',['To accept any arguments the function has','To make it faster','It is required by Python'],0],['What does <code>functools.wraps</code> preserve?',['The return value','The original name and docstring','The execution time'],1]]}
+q:[['<code>@timer</code> above <code>def slow()</code> is equivalent to:',['slow = timer(slow)','timer = slow(timer)','slow() = timer'],0],['Why does the wrapper take <code>*args, **kwargs</code>?',['To accept any arguments the function has','To make it faster','It is required by Python'],0],['What does <code>functools.wraps</code> preserve?',['The return value','The original name and docstring','The execution time'],1]]},
+{id:'2-1',w:2,t:'Classes and instances',v:'oop1',pl:'PL-osiE80TeTsqhIuOqKhwlXsIBIdSeYtc',i:0,e:0,
+s:'A <b>class</b> is a blueprint; an <b>instance</b> is one object built from it. <code>__init__</code> runs when an instance is created and sets its attributes through <code>self</code>. Methods are functions defined in the class that receive the instance as their first argument.',
+d:'<p><code>self</code> is the instance the method was called on: <code>r.status()</code> is shorthand for <code>Robot.status(r)</code>. Forgetting <code>self</code> in a method definition is the most common beginner error.</p><p>Think of a class as a robot design file and each instance as a built robot with its own battery level and position.</p>',
+tm:[['Class','A blueprint that defines attributes and methods.'],['Instance','A single object created from a class.'],['__init__ and self','__init__ sets up a new instance; self refers to that instance.'],['Method','A function defined inside a class.']],
+c:'class Robot:\n    def __init__(self, name, battery=100):\n        self.name = name\n        self.battery = battery\n\n    def status(self):\n        return f"{self.name}: {self.battery}% battery"\n\nr1 = Robot("Rover")\nr2 = Robot("Scout", 60)\nprint(r1.status())   # Rover: 100% battery',
+tk:[['Add a <code>drive(self, km)</code> method to <code>Robot</code> that reduces battery by 2 per km, never below 0.','Use <code>max(0, ...)</code>.','    def drive(self, km):\n        self.battery = max(0, self.battery - 2 * km)'],['Create a <code>Student</code> class with a name, a list of grades and an <code>average()</code> method.','Start grades as an empty list inside <code>__init__</code>.','class Student:\n    def __init__(self, name):\n        self.name = name\n        self.grades = []\n\n    def average(self):\n        return sum(self.grades) / len(self.grades)']],
+q:[['What does <code>__init__</code> do?',['Runs when an instance is created, to set it up','Deletes an object','Defines a class variable'],0],['What is <code>self</code>?',['The class itself','The instance the method was called on','A keyword that cannot be renamed'],1],['A class compared to an instance is like:',['A blueprint compared to a built product','A built product compared to its blueprint','A variable compared to a function'],0]]},
+{id:'2-2',w:2,t:'Class variables, classmethods and staticmethods',v:'oop2-3',pl:'PL-osiE80TeTsqhIuOqKhwlXsIBIdSeYtc',i:1,e:2,
+s:'A <b>class variable</b> is shared by every instance; an <b>instance variable</b> belongs to one object. A <code>@classmethod</code> receives the class (<code>cls</code>) and is often used as an alternative constructor. A <code>@staticmethod</code> receives neither and is a plain function that lives in the class for organization.',
+d:'<p>Assigning to <code>obj.count</code> creates an instance variable that hides the class variable; it does not change the shared one. To change the shared value, assign through the class: <code>Robot.count += 1</code>.</p><p>Rule of thumb: need the instance, use a normal method; need the class, use <code>@classmethod</code>; need neither, use <code>@staticmethod</code>.</p>',
+tm:[['Class variable','An attribute shared by all instances of a class.'],['Instance variable','An attribute that belongs to one specific object.'],['classmethod','A method that receives the class as cls; often an alternative constructor.'],['staticmethod','A method that receives no automatic first argument.']],
+c:'class Robot:\n    count = 0                        # class variable\n\n    def __init__(self, name):\n        self.name = name             # instance variable\n        Robot.count += 1\n\n    @classmethod\n    def from_string(cls, text):      # alternative constructor\n        name = text.split("-")[0]\n        return cls(name)\n\n    @staticmethod\n    def is_valid_name(name):\n        return name.isalpha()\n\nr = Robot.from_string("rover-v2")\nprint(Robot.count)                   # 1',
+tk:[['Add a class variable <code>max_battery = 100</code> to <code>Robot</code> and use it as the default battery.','Inside the class body, a name defined earlier can be used as a default value.','class Robot:\n    max_battery = 100\n\n    def __init__(self, name, battery=max_battery):\n        self.name = name\n        self.battery = battery'],['Write a classmethod <code>Robot.from_dict(data)</code> that builds a robot from a dict with <code>"name"</code> and <code>"battery"</code> keys.','Return <code>cls(...)</code>, not <code>Robot(...)</code>.','    @classmethod\n    def from_dict(cls, data):\n        return cls(data["name"], data["battery"])']],
+q:[['Which is shared by all instances?',['A class variable','An instance variable','A local variable'],0],['What does a classmethod receive as its first argument?',['The instance','The class','Nothing'],1],['When is a staticmethod appropriate?',['When it needs neither the instance nor the class','When it must change instance data','When it must change class data'],0]]},
+{id:'2-3',w:2,t:'Inheritance, dunder methods and properties',v:'oop4-6',pl:'PL-osiE80TeTsqhIuOqKhwlXsIBIdSeYtc',i:3,e:5,
+s:'A subclass <b>inherits</b> methods from a parent class and can override them; <code>super()</code> calls the parent’s version. <b>Dunder methods</b> such as <code>__repr__</code> and <code>__eq__</code> let your objects work with Python’s built-in behavior. A <code>@property</code> makes a method read like an attribute, so you can add validation without changing how callers use it.',
+d:'<p>Always define <code>__repr__</code>: it is what you see in a debugger and it makes bugs far easier to spot. Properties let you start with a plain attribute and add rules later without breaking existing code.</p><p>Use inheritance for true "is-a" relationships (a Drone is a Robot). For "has-a", store the other object as an attribute instead.</p>',
+tm:[['Inheritance','A subclass reuses and extends the behavior of a parent class.'],['super()','Gives access to the parent class’s methods from the subclass.'],['Dunder method','A method with double underscores, like __repr__, that Python calls for you.'],['Property','A method accessed like an attribute, often used for validation.']],
+c:'class Robot:\n    def __init__(self, name):\n        self.name = name\n        self._battery = 100\n\n    def __repr__(self):\n        return f"Robot({self.name!r}, battery={self._battery})"\n\n    @property\n    def battery(self):\n        return self._battery\n\n    @battery.setter\n    def battery(self, value):\n        if not 0 <= value <= 100:\n            raise ValueError("battery must be 0-100")\n        self._battery = value\n\nclass Drone(Robot):\n    def __init__(self, name, altitude=0):\n        super().__init__(name)\n        self.altitude = altitude',
+tk:[['Create a <code>Drone</code> subclass of <code>Robot</code> with an <code>ascend(meters)</code> method that raises its altitude.','Call <code>super().__init__(name)</code> first, then set the altitude.','class Drone(Robot):\n    def __init__(self, name):\n        super().__init__(name)\n        self.altitude = 0\n\n    def ascend(self, meters):\n        self.altitude += meters'],['Add <code>__eq__</code> to <code>Robot</code> so two robots with the same name are equal.','Check that the other object is a Robot first.','    def __eq__(self, other):\n        return isinstance(other, Robot) and self.name == other.name']],
+q:[['What does <code>super()</code> give you?',['Access to the parent class’s methods','A copy of the object','Only the class variables'],0],['Which dunder controls how an object is displayed in a debugger or the REPL?',['__repr__','__init__','__eq__'],0],['Why use a property?',['To run validation while keeping attribute-style access','To make a method private','To speed up code'],0]]},
+{id:'2-4',w:2,t:'Exceptions, modules and imports',v:'nv24',nv:1,
+s:'Exceptions are how Python reports problems. <code>try/except</code> catches them so your program can recover, and <code>raise</code> creates them. A <b>module</b> is a <code>.py</code> file you can <code>import</code>; a <b>package</b> is a folder of modules.',
+d:'<p>Catch the narrowest exception you can (<code>except ValueError</code>, not a bare <code>except</code>). A bare except hides real bugs. Read tracebacks from the bottom: the last line is the error and the lines above show how the program got there.</p><p>Wrap code in <code>if __name__ == "__main__":</code> so it runs only when the file is executed directly, not when imported. Flask’s <code>app.run()</code> usually lives there.</p>',
+tm:[['Exception','An object Python raises when something goes wrong.'],['Traceback','The report showing the chain of calls that led to an error.'],['Module and package','A module is one .py file; a package is a folder of modules.'],['__main__ guard','A check that runs code only when the file is executed directly.']],
+c:'def read_speed(text):\n    try:\n        speed = float(text)\n    except ValueError:\n        print("Not a number, using 0")\n        return 0.0\n    else:\n        return speed\n    finally:\n        print("done")        # always runs\n\n# helpers.py\ndef clamp(v, lo, hi):\n    return max(lo, min(v, hi))\n\n# main.py\nfrom helpers import clamp\n\nif __name__ == "__main__":\n    print(clamp(150, 0, 100))',
+tk:[['Write <code>safe_int(text, default=0)</code> that returns an int, or the default if conversion fails.','Catch <code>ValueError</code>.','def safe_int(text, default=0):\n    try:\n        return int(text)\n    except ValueError:\n        return default'],['Create <code>geometry.py</code> with an <code>area(w, h)</code> function and <code>main.py</code> that imports and uses it, guarded by <code>__main__</code>.','Run <code>python main.py</code> from the same folder.','# geometry.py\ndef area(w, h):\n    return w * h\n\n# main.py\nfrom geometry import area\n\nif __name__ == "__main__":\n    print(area(3, 4))']],
+q:[['Which is best practice?',['Catch the specific exception you expect','Use a bare except everywhere','Never catch exceptions'],0],['Where do you look first in a traceback?',['The last line','The first line','The middle'],0],['What does <code>if __name__ == "__main__"</code> do?',['Runs the code only when the file is run directly','Imports the module','Defines a class'],0]]},
+{id:'2-5',w:2,t:'Files, JSON and a CLI quiz app',v:'-51jxlQaxyA',more:'9N6a-VLBa2I',e:1,
+s:'Use <code>with open(...)</code> so files close automatically. JSON is a text format for structured data: <code>json.load</code> reads a file into dicts and lists, and <code>json.dump</code> writes them back. Combine this with classes and functions to build a small command-line quiz app.',
+d:'<p>Pass <code>encoding="utf-8"</code> when opening text files, and check a file exists with <code>pathlib.Path</code>. JSON keys are always strings, and Python’s <code>None</code> becomes <code>null</code>.</p><p>JSON is also the language of web APIs. You will use exactly these ideas when Flask sends and receives data in later weeks.</p>',
+tm:[['Context manager','The with statement guarantees cleanup, such as closing a file, even after an error.'],['JSON','A text format for structured data built from objects, lists, strings and numbers.'],['Serialization','Turning Python objects into text that can be stored or sent.'],['pathlib','A module that treats file paths as objects.']],
+c:'import json\nfrom pathlib import Path\n\npath = Path("questions.json")\n\ndata = [{"q": "2 + 2?", "options": ["3", "4"], "answer": 1}]\nwith open(path, "w", encoding="utf-8") as f:\n    json.dump(data, f, indent=2)\n\nwith open(path, encoding="utf-8") as f:\n    questions = json.load(f)\n\nfor item in questions:\n    print(item["q"], item["options"])',
+tk:[['Write <code>load_questions(path)</code> that returns a list from a JSON file, or an empty list if the file does not exist.','Check <code>Path.exists()</code> or catch <code>FileNotFoundError</code>.','import json\nfrom pathlib import Path\n\ndef load_questions(path):\n    p = Path(path)\n    if not p.exists():\n        return []\n    with open(p, encoding="utf-8") as f:\n        return json.load(f)'],['Project: build a command-line quiz that loads questions from JSON, asks them one by one, scores the player, and saves the high score to a file.','Break it into small functions: load, ask, score, save.','def ask(item):\n    for i, opt in enumerate(item["options"]):\n        print(i, opt)\n    return int(input("Answer: ")) == item["answer"]\n\ndef run(questions):\n    score = sum(ask(q) for q in questions)\n    print(f"{score}/{len(questions)}")\n    return score']],
+q:[['Why use <code>with open(...)</code>?',['The file is closed automatically','It makes reading faster','It encrypts the file'],0],['Which function writes Python data to a JSON file?',['json.dump','json.load','json.parse'],0],['What does Python <code>None</code> become in JSON?',['null','none','0'],0]]}
 ];
 const K='pythonhub-v1';let S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
 S=Object.assign({done:{},quiz:{},score:{},watched:{},time:{},log:{},days:{},theme:'dark',last:null},S||{});
-const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};S.miss=S.miss||{};S.bk=S.bk||{};S.fc=S.fc||{};S.fcT=S.fcT||{};
 const ds=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),today=()=>ds(new Date()),nd=()=>Object.keys(S.done).length;
 function streak(){let n=0,m=0,d=new Date();for(let i=0;i<400;i++){if(S.days[ds(d)]){n++;m=0}else if(++m>=2)break;d.setDate(d.getDate()-1)}return n}
 function weekSecs(){const d=new Date(),k=(d.getDay()+6)%7;let t=0;for(let i=0;i<=k;i++){t+=S.log[ds(d)]||0;d.setDate(d.getDate()-1)}return t}
@@ -286,16 +355,34 @@ const road=()=>{const cw=(L.find(l=>!S.done[l.id])||{w:2}).w;return `<ol class="
 function hl(c){const re=/(#.*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(def|return|import|from|class|if|elif|else|for|in|while|with|as|nonlocal|global|lambda|None|True|False|print|try|except|raise|pass)\b|(@\w+)|\b(\d+\.?\d*)\b/g;let o='',i=0,m;
 while(m=re.exec(c)){o+=esc(c.slice(i,m.index));const k=m[1]?'c':m[2]?'s':m[3]?'k':m[4]?'d':'n';o+=`<span class="t-${k}">${esc(m[0])}</span>`;i=re.lastIndex}return o+esc(c.slice(i))}
 const cb=c=>`<div class="code"><button class="cp" data-act="copy">Copy</button><pre>${hl(c)}</pre></div>`;
+const IC={home:'<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/>',road:'<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h6.5a3.5 3.5 0 0 0 0-7h-5a3.5 3.5 0 0 1 0-7H16"/>',study:'<path d="M12 6.5C10 5 7 4.5 4 4.5v14c3 0 6 .5 8 2 2-1.5 5-2 8-2v-14c-3 0-6 .5-8 2z"/><path d="M12 6.5v14"/>',prog:'<path d="M5 20v-6M12 20V5M19 20v-10"/>',menu:'<path d="M4 7h16M4 12h16M4 17h10"/>',moon:'<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',mark:'<path d="M6 4h12v17l-6-4-6 4z"/>'};
+const ic=n=>`<svg viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
+function chrome(){$('#bnav').innerHTML=[['#/','home','Home'],['#/roadmap','road','Roadmap'],['#/tools','study','Study'],['#/progress','prog','Progress']].map(x=>`<a href="${x[0]}">${ic(x[1])}<span>${x[2]}</span></a>`).join('');$('[data-act=menu]').innerHTML=ic('menu');$('[data-act=theme]').innerHTML=ic('moon')}
+const terms=()=>L.flatMap(l=>l.tm.map(x=>({t:x[0],d:x[1],l})));
+let tl='glossary',fc={f:0},rv={k:null,ok:0};
+function tools(t){tl=t;return `<h1>Study tools</h1><div class="tabs">${[['glossary','Glossary'],['cards','Flashcards'],['review','Review mistakes'],['saved','Saved lessons']].map(x=>`<button data-act="go" data-t="#/tools/${x[0]}" class="${x[0]==t?'on':''}">${x[1]}</button>`).join('')}</div><div id="tw">${tw()}</div>`}
+const tw=()=>tl=='cards'?cards():tl=='review'?review():tl=='saved'?saved():gloss();
+const paint=()=>{$('#tw').innerHTML=tw()};
+function gloss(){return `<dl>${terms().sort((a,b)=>a.t.localeCompare(b.t)).map(x=>`<div><dt>${x.t}</dt><dd>${x.d} <a class="lk" href="#/l/${x.l.id}">${x.l.t}</a></dd></div>`).join('')}</dl>`}
+const deck=()=>terms().sort((a,b)=>(S.fc[a.t]||0)-(S.fc[b.t]||0)||(S.fcT[a.t]||0)-(S.fcT[b.t]||0));
+function cards(){const d=deck(),c=d[0];return `<p class="mu">${d.filter(x=>(S.fc[x.t]||0)>=3).length} of ${d.length} terms mastered. Cards you know well come back last.</p><div class="fcard ${fc.f?'flip':''}" data-act="flip"><span class="mu">${fc.f?'Definition':'Term'}</span><div class="ft">${fc.f?c.d:c.t}</div><span class="mu">${c.l.t}</span></div>${fc.f?'<div class="r2"><button class="gh" data-act="rate" data-r="0">Again</button><button class="btn" data-act="rate" data-r="1">Got it</button></div>':'<p class="mu">Tap the card to reveal the answer.</p>'}`}
+const missed=()=>Object.keys(S.miss).map(k=>{const p=k.split('|'),l=L.find(x=>x.id==p[0]);return l&&l.q[p[1]]?{key:k,q:l.q[p[1]],l}:null}).filter(Boolean);
+function review(){const m=missed();if(!m.length)return '<div class="card"><h3>Nothing to review</h3><p class="mu">Questions you get wrong in a quiz appear here until you answer them correctly.</p></div>';const x=m[0],q=x.q,a=rv.k!=null;
+return `<div class="card"><div class="mu">${m.length} to review, from ${x.l.t}</div><h3>${q[0]}</h3><div class="opts">${q[1].map((o,k)=>`<button class="opt ${a?(k==q[2]?'good':k==rv.k?'bad':''):''}" data-act="rpick" data-k="${k}">${o}</button>`).join('')}</div>${a?'<button class="btn" data-act="rnext">Continue</button>':''}</div>`}
+function saved(){const b=L.filter(l=>S.bk[l.id]);return b.length?`<div class="ls col">${b.map(l=>`<a href="#/l/${l.id}">${l.t} <span class="mu">Week ${l.w}</span></a>`).join('')}</div>`:'<div class="card"><h3>No saved lessons</h3><p class="mu">Use Save lesson on any lesson page to keep it here.</p></div>'}
+const idx=()=>L.flatMap(l=>[{t:l.t,k:'Lesson',l,x:l.t+' '+l.s.replace(/<[^>]+>/g,'')},...l.tm.map(x=>({t:x[0],k:'Key term',l,x:x[0]+' '+x[1]})),...l.tk.map((x,j)=>({t:'Task '+(j+1),k:'Practice',l,x:x[0].replace(/<[^>]+>/g,'')}))]);
+document.addEventListener('input',e=>{if(e.target.id!='sq')return;const q=e.target.value.trim().toLowerCase(),r=$('#sr');if(q.length<2){r.className='';return}const m=idx().filter(i=>i.x.toLowerCase().includes(q)).slice(0,8);r.className='on';r.innerHTML=m.length?m.map(i=>`<a href="#/l/${i.l.id}"><b>${i.t}</b><span class="mu">${i.k} in ${i.l.t}</span></a>`).join(''):'<p class="mu">No matches. Try another word.</p>'});
 function prog(){const s=new Date();s.setDate(s.getDate()-((s.getDay()+6)%7)-77);const t=today();let c='';
 for(let i=0;i<84;i++){const k=ds(s),m=(S.log[k]||0)/60,lv=!m?0:m<10?1:m<30?2:m<60?3:4;c+=`<i class="h${lv}${k>t?' f':''}" title="${k}: ${Math.round(m)} min"></i>`;s.setDate(s.getDate()+1)}
-const bs=[['First lesson',nd()>0],['Week 1 complete',L.every(l=>S.done[l.id])],['3-day streak',streak()>=3],['7-day streak',streak()>=7],['5 hours in a week',weekSecs()>=18000]];
+const bs=[['First lesson',nd()>0],['Week 1 complete',L.filter(l=>l.w==1).every(l=>S.done[l.id])],['3-day streak',streak()>=3],['7-day streak',streak()>=7],['5 hours in a week',weekSecs()>=18000]];
 return `<h1>Progress</h1><div class="card"><b>Study time</b> <span class="mu">last 12 weeks</span><div class="heat">${c}</div></div><h2>Badges</h2><div class="bd">${bs.map(b=>`<span class="bg ${b[1]?'on':''}">${b[1]?'★':'☆'} ${b[0]}</span>`).join('')}</div><h2>Lessons</h2><div class="card">${L.map(l=>`<div class="row"><span>${S.done[l.id]?'✓':'○'} ${l.t}</span><span class="mu">${Math.round((S.time[l.id]||0)/60)} min · quiz ${S.score[l.id]!=null?S.score[l.id]+'%':'not taken'}</span></div>`).join('')}</div>`}
 let qs={i:0,ok:0,k:null};
 function lesson(l){S.last=l.id;save();const i=L.indexOf(l),p=L[i-1],n=L[i+1];
-return `<div class="mu">Week ${l.w}, lesson ${i+1} of 5</div><h1>${l.t}</h1><div class="chips"><span class="chip" id="cv"></span><span class="chip" id="cq"></span><span class="chip" id="cd"></span></div>
+return `<div class="mu">Week ${l.w}, lesson ${L.filter(x=>x.w==l.w).indexOf(l)+1} of 5</div><h1>${l.t}</h1><div class="chips"><button class="gh bk ${S.bk[l.id]?'on':''}" data-act="bk">${ic('mark')}<span>${S.bk[l.id]?'Saved':'Save lesson'}</span></button><span class="chip" id="cv"></span><span class="chip" id="cq"></span><span class="chip" id="cd"></span></div>
 <div class="tabs">${[['watch','Watch'],['read','Read'],['practice','Practice'],['quiz','Quiz']].map(t=>`<button data-act="tab" data-t="${t[0]}" id="t-${t[0]}">${t[1]}</button>`).join('')}</div><div id="tp"></div>
 <div class="nav">${p?`<a class="btn2" href="#/l/${p.id}">Previous: ${p.t}</a>`:'<span></span>'}${n?`<a class="btn2" href="#/l/${n.id}">Next: ${n.t}</a>`:'<span></span>'}</div>`}
 function panel(l,t){
+if(t=='watch'&&l.nv)return '<div class="card"><h3>This lesson is read-first</h3><p class="mu">There is no video for this one. Work through the notes on the Read tab.</p><button class="btn" data-act="tab" data-t="read">Start reading</button></div>';
 if(t=='watch')return `<div class="vid"><div id="pl"></div></div><a class="lnk" data-act="watched" data-v="${l.v}">Video not tracking? Mark as watched</a>`;
 if(t=='read')return `<div class="rd"><article><section id="s-sum"><h2>Summary</h2><p>${l.s}</p><details><summary>Go deeper</summary>${l.d}</details></section><section id="s-terms"><h2>Key terms</h2><dl>${l.tm.map(x=>`<dt>${x[0]}</dt><dd>${x[1]}</dd>`).join('')}</dl></section><section id="s-code"><h2>Code</h2>${cb(l.c)}</section></article><aside class="toc"><b>On this page</b><a data-act="jump" data-t="s-sum">Summary</a><a data-act="jump" data-t="s-terms">Key terms</a><a data-act="jump" data-t="s-code">Code</a></aside></div>`;
 if(t=='practice')return `<p class="mu">Solve these in your own editor with AI off. Open the hint only after you have tried.</p>${l.tk.map((x,j)=>`<div class="card"><h3>Task ${j+1}</h3><p>${x[0]}</p><details><summary>Hint</summary><p>${x[1]}</p></details><details><summary>Solution</summary>${cb(x[2])}</details></div>`).join('')}`;
@@ -305,37 +392,44 @@ if(qs.i>=n){const pc=Math.round(qs.ok/n*100),pass=pc>=70;return `<div class="car
 const q=l.q[qs.i],a=qs.k!=null;
 return `<div class="card"><div class="mu">Question ${qs.i+1} of ${n}</div><h3>${q[0]}</h3><div class="opts">${q[1].map((o,k)=>`<button class="opt ${a?(k==q[2]?'good':k==qs.k?'bad':''):''}" data-act="pick" data-k="${k}">${o}</button>`).join('')}</div>${a?`<p class="${qs.k==q[2]?'ok':'mu'}">${qs.k==q[2]?'Correct.':'The answer is: '+q[1][q[2]]}</p><button class="btn" data-act="next">${qs.i+1<n?'Next question':'See result'}</button>`:''}</div>`}
 function setTab(t){const l=cur();if(!l)return;try{yt&&yt.destroy&&yt.destroy()}catch(e){}yt=null;clearInterval(poll);if(t=='quiz')qs={i:0,ok:0,k:null};
-const tp=$('#tp');tp.className='';void tp.offsetWidth;tp.className='view';tp.innerHTML=panel(l,t);document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));if(t=='watch')mount(l.v);status()}
-function side(){const h=location.hash,cw=(L.find(l=>'#/l/'+l.id==h)||L[0]).w;let o='<div class="brand"><img src="favicon.svg" width="30" height="30" alt=""><span>PythonHub</span></div>';
+const tp=$('#tp');tp.className='';void tp.offsetWidth;tp.className='view';tp.innerHTML=panel(l,t);document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));if(t=='watch'&&!l.nv)mount(l);status()}
+function side(){const h=location.hash,cw=(L.find(l=>'#/l/'+l.id==h)||L[0]).w;let o=`<a class="brand" href="#/"><img src="favicon.svg" width="30" height="30" alt=""><span>PythonHub</span></a><nav class="sn">${[['#/','home','Home'],['#/roadmap','road','Roadmap'],['#/tools','study','Study tools'],['#/progress','prog','Progress']].map(x=>`<a href="${x[0]}" class="${(x[0]=='#/'?(h==''||h=='#/'):h.startsWith(x[0]))?'on':''}">${ic(x[1])}<span>${x[2]}</span></a>`).join('')}</nav>`;
 W.forEach((t,i)=>{const ls=L.filter(l=>l.w==i+1),dn=ls.filter(l=>S.done[l.id]).length;
 if(!ls.length){o+=`<div class="wk soon"><span>Week ${i+1}</span><em>${t}</em><small>Soon</small></div>`;return}
 o+=`<details class="wk" ${i+1==cw?'open':''}><summary><span>Week ${i+1}</span><em>${t}</em><small>${dn}/5</small></summary>${ls.map(l=>`<a href="#/l/${l.id}" class="${S.done[l.id]?'dn':''} ${h=='#/l/'+l.id?'on':''}">${S.done[l.id]?'✓':'○'} ${l.t}</a>`).join('')}</details>`});
 $('#side').innerHTML=o+'<div class="tools"><button class="gh" data-act="theme">Switch theme</button><button class="gh" data-act="export">Export progress</button><label class="gh">Import progress<input type="file" id="im" accept=".json" hidden></label></div>'}
 let curId=null,yt=null,poll=null;const cur=()=>L.find(l=>l.id===curId);
-function tryComplete(l){if(!S.done[l.id]&&S.watched[l.v]&&S.quiz[l.id]){S.done[l.id]=1;S.days[today()]=(S.days[today()]||0)+1;save();side();celebrate();toast('Lesson complete')}}
-function status(){const l=cur();if(!l)return;tryComplete(l);const f=(id,ok,t)=>{const e=$(id);if(e){e.className='chip'+(ok?' ok':'');e.textContent=(ok?'✓ ':'○ ')+t}};f('#cv',S.watched[l.v],'Video watched');f('#cq',S.quiz[l.id],'Quiz passed');f('#cd',S.done[l.id],'Lesson complete');const a=$('#t-watch'),b=$('#t-quiz');a&&a.classList.toggle('ck',!!S.watched[l.v]);b&&b.classList.toggle('ck',!!S.quiz[l.id])}
-function mount(v){const go=()=>{if(!$('#pl'))return;yt=new YT.Player('pl',{videoId:v,playerVars:{rel:0},events:{onStateChange:e=>{clearInterval(poll);if(e.data===1)poll=setInterval(()=>{const d=yt.getDuration();if(d>0&&yt.getCurrentTime()/d>=.9){clearInterval(poll);S.watched[v]=1;save();status()}},2000)}}})};window.YT&&YT.Player?go():window.onYouTubeIframeAPIReady=go}
+function tryComplete(l){if(!S.done[l.id]&&(l.nv||S.watched[l.v])&&S.quiz[l.id]){S.done[l.id]=1;S.days[today()]=(S.days[today()]||0)+1;save();side();celebrate();toast('Lesson complete')}}
+function status(){const l=cur();if(!l)return;tryComplete(l);const f=(id,ok,t)=>{const e=$(id);if(e){e.className='chip'+(ok?' ok':'');e.textContent=(ok?'✓ ':'○ ')+t}};f('#cv',l.nv||S.watched[l.v],l.nv?'No video needed':'Video watched');f('#cq',S.quiz[l.id],'Quiz passed');f('#cd',S.done[l.id],'Lesson complete');const a=$('#t-watch'),b=$('#t-quiz');a&&a.classList.toggle('ck',!!(l.nv||S.watched[l.v]));b&&b.classList.toggle('ck',!!S.quiz[l.id])}
+function mount(l){const go=()=>{if(!$('#pl'))return;const m=l.pl||l.more,o=l.pl?{playerVars:{rel:0,listType:'playlist',list:l.pl,index:l.i}}:{videoId:l.v,playerVars:l.more?{rel:0,playlist:l.more}:{rel:0}};
+yt=new YT.Player('pl',{...o,events:{onStateChange:e=>{clearInterval(poll);if(e.data===1)poll=setInterval(()=>{const d=yt.getDuration();if(d>0&&yt.getCurrentTime()/d>=.9&&(!m||yt.getPlaylistIndex()>=l.e)){clearInterval(poll);S.watched[l.v]=1;save();status()}},2000)}}})};window.YT&&YT.Player?go():window.onYouTubeIframeAPIReady=go}
 function celebrate(){for(let i=0;i<32;i++){const e=document.createElement('b');e.className='cf';e.style.cssText=`left:${Math.random()*100}vw;background:${['#4D8DFF','#8FD0FF','#F2B45A','#FFE0A3'][Math.random()*4|0]};animation-delay:${Math.random()*.4}s`;document.body.appendChild(e);setTimeout(()=>e.remove(),2400)}}
 function toast(m){const e=document.createElement('div');e.className='toast';e.textContent=m;document.body.appendChild(e);setTimeout(()=>e.remove(),2600)}
 function route(){const h=location.hash.slice(1)||'/',v=$('#view'),m=h.match(/^\/l\/(.+)$/);try{yt&&yt.destroy&&yt.destroy()}catch(e){}yt=null;clearInterval(poll);curId=null;
 v.className='';void v.offsetWidth;v.className='view';
 const l=m&&L.find(x=>x.id===m[1]);
-if(l){curId=l.id;v.innerHTML=lesson(l);setTab('watch')}else v.innerHTML=h=='/roadmap'?'<h1>Roadmap</h1>'+road():h=='/progress'?prog():home();
-side();document.querySelectorAll('#bnav a').forEach(a=>a.classList.toggle('on',a.getAttribute('href')==='#'+h));$('#side').classList.remove('open');scrollTo(0,0)}
+if(l){curId=l.id;v.innerHTML=lesson(l);setTab('watch')}else v.innerHTML=h=='/roadmap'?'<h1>Roadmap</h1>'+road():h=='/progress'?prog():h.startsWith('/tools')?tools(h.split('/')[2]||'glossary'):home();
+side();document.querySelectorAll('#bnav a').forEach(a=>a.classList.toggle('on',('#'+h).startsWith(a.getAttribute('href'))&&(a.getAttribute('href')!='#/'||h=='/')));$('#side').classList.remove('open');$('#sr').className='';$('#sq').value='';scrollTo(0,0)}
 document.addEventListener('click',e=>{const a=e.target.closest('[data-act]');if(!a)return;const t=a.dataset.act;
 if(t=='theme'){S.theme=S.theme=='dark'?'light':'dark';document.documentElement.dataset.theme=S.theme;save()}
 else if(t=='menu'){innerWidth<900?$('#side').classList.toggle('open'):document.body.classList.toggle('collapsed')}
 else if(t=='export'){const b=document.createElement('a');b.href=URL.createObjectURL(new Blob([JSON.stringify(S)],{type:'application/json'}));b.download='pythonhub-progress.json';b.click()}
 else if(t=='tab')setTab(a.dataset.t);
 else if(t=='copy'){const c=a.nextElementSibling.textContent;navigator.clipboard&&navigator.clipboard.writeText(c).then(()=>{a.textContent='Copied';setTimeout(()=>a.textContent='Copy',1500)})}
-else if(t=='pick'){if(qs.k==null){const l=cur(),q=l.q[qs.i];qs.k=+a.dataset.k;if(qs.k==q[2])qs.ok++;$('#tp').innerHTML=quizHtml(l)}}
+else if(t=='pick'){if(qs.k==null){const l=cur(),q=l.q[qs.i];qs.k=+a.dataset.k;const key=l.id+'|'+qs.i;if(qs.k==q[2]){qs.ok++;delete S.miss[key]}else S.miss[key]=1;save();$('#tp').innerHTML=quizHtml(l)}}
 else if(t=='next'){const l=cur();qs.i++;qs.k=null;if(qs.i>=l.q.length){const pc=Math.round(qs.ok/l.q.length*100);S.score[l.id]=Math.max(S.score[l.id]||0,pc);if(pc>=70)S.quiz[l.id]=1;save();status()}$('#tp').innerHTML=quizHtml(l)}
 else if(t=='retry'){qs={i:0,ok:0,k:null};$('#tp').innerHTML=quizHtml(cur())}
+else if(t=='go')location.hash=a.dataset.t;
+else if(t=='flip'){fc.f=!fc.f;paint()}
+else if(t=='rate'){const c=deck()[0],lv=S.fc[c.t]||0;S.fc[c.t]=+a.dataset.r?Math.min(3,lv+1):0;S.fcT[c.t]=Date.now();fc.f=0;save();paint()}
+else if(t=='rpick'){if(rv.k==null){const x=missed()[0];rv.k=+a.dataset.k;rv.ok=rv.k==x.q[2];paint()}}
+else if(t=='rnext'){const x=missed()[0];delete S.miss[x.key];if(!rv.ok)S.miss[x.key]=1;rv={k:null,ok:0};save();paint()}
+else if(t=='bk'){const id=cur().id;S.bk[id]=!S.bk[id];if(!S.bk[id])delete S.bk[id];save();a.classList.toggle('on',!!S.bk[id]);a.querySelector('span').textContent=S.bk[id]?'Saved':'Save lesson'}
 else if(t=='jump')document.getElementById(a.dataset.t).scrollIntoView({behavior:'smooth',block:'start'})
 else if(t=='watched'){S.watched[a.dataset.v]=1;save();status()}});
 document.addEventListener('change',e=>{if(e.target.id=='im'){const f=e.target.files[0];f&&f.text().then(x=>{try{Object.assign(S,JSON.parse(x));save();route();toast('Progress imported')}catch(err){alert('That file is not a valid PythonHub export.')}})}});
 let tick=0;setInterval(()=>{if(curId&&!document.hidden){S.time[curId]=(S.time[curId]||0)+1;S.log[today()]=(S.log[today()]||0)+1;if(++tick%15==0)save()}},1000);
-window.addEventListener('hashchange',route);document.documentElement.dataset.theme=S.theme;route();
+window.addEventListener('hashchange',route);document.documentElement.dataset.theme=S.theme;chrome();route();
 const ys=document.createElement('script');ys.src='https://www.youtube.com/iframe_api';document.head.appendChild(ys);
 </script>
 </body>
