@@ -261,6 +261,20 @@ dt{color:var(--gold)}
 .vl button:hover{border-color:var(--ac);transform:translateX(4px)}
 </style>
 <style>.vl button.ck::after{content:" ✓";color:var(--ok)}.lnk+.lnk{margin-left:var(--s3)}</style>
+<style>
+.notes{font-size:17px;line-height:1.85}
+.notes h2{font-size:34px;margin:64px 0 16px}
+.notes h2:first-child{margin-top:0}
+.notes h3{font-size:25px;margin:36px 0 10px}
+.notes p{margin:16px 0}
+.notes ul,.card ul{padding-left:22px;margin:14px 0}
+.notes li,.card li{margin:8px 0}
+.co{border-left:3px solid var(--gold);background:#f2b45a12;padding:14px 18px;border-radius:0 12px 12px 0;margin:var(--s2) 0}
+.qs p{font-size:17px;margin:8px 0 var(--s2);font-weight:500}
+.ti{width:100%;max-width:420px;background:var(--code);border:1px solid var(--ln);border-radius:12px;padding:12px 16px;color:var(--tx);font:15px "JetBrains Mono",monospace;margin:0 12px var(--s2) 0}
+.ti:focus{outline:0;border-color:var(--ac)}
+.bad2{color:#f87171}
+</style>
 </head>
 <body>
 <div id="app">
@@ -271,6 +285,242 @@ dt{color:var(--gold)}
 </main>
 </div>
 <nav id="bnav"></nav>
+<script type="text/markdown" id="n-1-1">
+===NOTES===
+## What you will be able to do after this lesson
+By the end of this lesson you will be able to check which Python you have, create an isolated environment for any project, activate it and leave it, install packages into it with pip, record those packages in a file, and rebuild the whole environment from that file on a clean machine. You will also be able to read the three errors beginners hit most often and say what caused each one.
+
+This can look like housekeeping, but it is the foundation of the whole course. Every Flask project you build will live in its own environment, and deployment later depends on the file you create here.
+
+## Part 1: What "Python is installed" actually means
+Installing Python gives you three things. The **interpreter** is the program (`python.exe`) that reads your code and runs it. The **standard library** is the set of modules that ship with Python, such as `json` and `pathlib`. And **site-packages** is a folder where third-party packages, like Flask, are stored. Third-party code is not part of Python. It lives on the **Python Package Index (PyPI)**, and **pip** is the tool that downloads it from there into site-packages.
+
+Check what you have. Open PowerShell and run:
+```powershell
+python --version
+```
+Expected output (the last number may differ): `Python 3.14.0`. If you see `'python' is not recognized`, either Python is not installed or its folder is not on your **PATH**, the list of folders Windows searches when you type a command. On Windows the `py` launcher is a second way in: `py --version` does the same job.
+
+Now check pip, and notice the shape of the command:
+```powershell
+python -m pip --version
+```
+The `-m` flag means "run this module as a script". So `python -m pip` asks this particular interpreter to run its own pip. Compare that with a bare `pip`, which means "whichever pip.exe Windows finds first on PATH", and that one may belong to a different Python. `python -m pip` removes the doubt, so it is the form we use throughout this course.
+
+## Part 2: The problem virtual environments solve
+Imagine project A (your quiz app) works with version 2 of a library, and project B (a new Flask site) needs version 3. Site-packages holds only one copy of each package per interpreter, so upgrading for B silently breaks A. There is a second problem: a global install hides what each project needs, so nobody, including future you, can say what to install on a new machine.
+
+A **virtual environment** solves both by giving each project its own private site-packages and its own `python` and `pip` launchers. Engineering analogy: a fleet of robots where every robot carries its own firmware and tool versions, so updating one never bricks another.
+
+## Part 3: Creating an environment
+```powershell
+mkdir pythonhub-demo
+cd pythonhub-demo
+python -m venv .venv
+```
+Read the last line piece by piece:
+- `python` runs the interpreter.
+- `-m venv` runs the standard-library module named `venv`.
+- `.venv` is the folder to create. The name is a convention, not a rule. Common alternatives are `venv` and `env`. The leading dot marks it as a tooling folder, and VS Code and most `.gitignore` templates recognise `.venv` automatically, so the convention saves you configuration.
+
+What you now have:
+```
+.venv/
+  pyvenv.cfg          # records which Python created this environment
+  Scripts/            # python.exe, pip.exe and the activate scripts (bin/ on macOS and Linux)
+  Lib/site-packages/  # empty for now: this is where YOUR packages will go
+```
+The environment is a small folder, not a full copy of Python. It points back at the interpreter that created it, which is why `pyvenv.cfg` exists.
+
+## Part 4: Activating it
+Creating an environment does not use it. You have to tell your terminal to use it:
+```powershell
+.venv\Scripts\Activate.ps1
+```
+Your prompt gains a `(.venv)` prefix. What activation does is modest: it puts `.venv\Scripts` at the front of PATH for **this terminal window only**, so `python` and `pip` resolve to the environment's copies, and it changes the prompt. Nothing is installed or changed system-wide. That is why a new terminal window starts without it.
+
+The command depends on your shell:
+- PowerShell: `.venv\Scripts\Activate.ps1`
+- Command Prompt: `.venv\Scripts\activate.bat`
+- Git Bash: `source .venv/Scripts/activate`
+- macOS and Linux: `source .venv/bin/activate`
+
+Leave the environment at any time with `deactivate`.
+
+### The error you will probably meet
+PowerShell may refuse with a message containing "running scripts is disabled on this system". Windows blocks script files by default, and `Activate.ps1` is a script. You have three routes, and each has a different outcome:
+- **Route A (recommended):** `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`. This relaxes the rule for the current window only and vanishes when you close it. Nothing permanent changes.
+- **Route B:** the same command with `-Scope CurrentUser`. It is permanent for your account. Convenient, but it changes your machine's security setting for good.
+- **Route C:** skip activation entirely and run `.venv\Scripts\python.exe` directly. This works because activation is only a convenience: the environment's interpreter is just a file you can call by path. It is also what scripts and deployment tools do.
+
+## Part 5: Installing packages with pip
+With the environment active, install Flask:
+```powershell
+python -m pip install flask
+```
+Piece by piece: `install` is the pip command, and `flask` is the package name on PyPI. Pip downloads Flask and also the several libraries it depends on, such as Werkzeug and Jinja2, and puts them all in `.venv\Lib\site-packages`. Inspect the result:
+```powershell
+python -m pip list          # every package installed in this environment
+python -m pip show flask    # version, location and what it depends on
+python -m pip uninstall flask
+```
+Run `pip list` in a fresh environment and you will see only pip itself. That emptiness is the point: the environment contains only what this project asked for.
+
+## Part 6: Recording your packages
+A project that cannot be rebuilt is a project that only works on your laptop. The standard solution is a text file named **requirements.txt**:
+```powershell
+python -m pip freeze > requirements.txt
+```
+`pip freeze` prints every installed package with its exact version, one per line. The `>` symbol is a shell operator that sends that output into a file instead of the screen, and it overwrites the file if it already exists. A file might look like this (your versions will differ):
+```
+blinker==1.9.0
+click==8.1.8
+Flask==3.1.0
+Jinja2==3.1.5
+```
+To rebuild the environment anywhere, create a fresh `.venv`, activate it, and run:
+```powershell
+python -m pip install -r requirements.txt
+```
+The `-r` flag means "read the list of packages from this file".
+
+There are two routes to a requirements file, with different outcomes:
+- **Freeze everything (the route above):** you get exact versions of every package, including the hidden dependencies. Rebuilding gives you an identical environment, which is what you want for deployment. The cost is a longer, noisier file.
+- **Write it by hand:** list only the packages you chose, for example `flask` alone. The file is short and readable, but a rebuild installs whatever versions are newest that day, so two machines can end up different.
+
+For this course, freeze. Reproducibility matters more than tidiness.
+
+## Part 7: What goes into Git
+Never commit the `.venv` folder. It holds absolute paths from your machine, compiled files for your operating system, and thousands of files that pip can regenerate in seconds. Commit `requirements.txt` instead. Add this line to a file named `.gitignore`:
+```
+.venv/
+```
+
+## Part 8: Reading the errors
+- **`'python' is not recognized as an internal or external command`:** Windows cannot find the interpreter. Fix PATH, reinstall Python with the PATH option ticked, or use `py` instead.
+- **`ModuleNotFoundError: No module named 'flask'`:** the interpreter running your code is not the one pip installed into. Almost always the environment is not activated, or VS Code is using a different interpreter. Diagnose it with `python -c "import sys; print(sys.executable)"` and check that the path points inside `.venv`.
+- **"running scripts is disabled on this system":** the execution policy problem from Part 4.
+
+## Part 9: How this connects to Flask
+Your Flask app will be a folder with a `.venv`, a `requirements.txt`, and your code. When you deploy in Week 11, the hosting platform will read `requirements.txt` and rebuild your environment on its own server. Every habit in this lesson is a habit you will use on every project from here on.
+
+## Recap and cheat sheet
+- Create: `python -m venv .venv`
+- Activate (PowerShell): `.venv\Scripts\Activate.ps1`
+- Leave: `deactivate`
+- Install: `python -m pip install <package>`
+- Inspect: `python -m pip list`
+- Record: `python -m pip freeze > requirements.txt`
+- Rebuild: `python -m pip install -r requirements.txt`
+- Git: ignore `.venv/`, commit `requirements.txt`
+===TASKS===
+### Build your first environment | guided
+Create a folder called `env-lab`, open PowerShell in it, create a virtual environment named `.venv`, activate it, and run `python -m pip list`. If PowerShell blocks the activation script, use Route A from Part 4.
+HINT: The prompt should start with `(.venv)` once activation works. If it does not, run the activate command again and read the error message carefully.
+EXPECT: Your prompt starts with `(.venv)` and `pip list` shows only `pip` (and possibly a very small number of other base packages).
+SOL:
+```powershell
+mkdir env-lab
+cd env-lab
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.venv\Scripts\Activate.ps1
+python -m pip list
+```
+### Prove the environment is isolated | guided
+Run `python -c "import sys; print(sys.prefix)"` once while the environment is active and once after `deactivate`. Compare the two paths and write one sentence explaining the difference.
+HINT: `sys.prefix` is the folder of the Python installation currently in use.
+EXPECT: Active: a path ending in `env-lab\.venv`. Deactivated: the path of your global Python installation.
+SOL:
+Inside the environment the prefix points at the `.venv` folder, because `python` now resolves to the environment's copy. Outside it points at the global installation. This is the proof that activation switches which interpreter you are using.
+### Rebuild an environment from a file | independent
+Install `requests` into your environment, freeze to `requirements.txt`, then deactivate and delete the `.venv` folder. Create a new `.venv`, activate it, install from `requirements.txt`, and verify that it works by printing the version of `requests`.
+HINT: Use `python -c "import requests; print(requests.__version__)"` to verify. Delete the folder in File Explorer or with `Remove-Item -Recurse -Force .venv`.
+EXPECT: A version number prints, and `requirements.txt` lists `requests` with several of its dependencies.
+SOL:
+```powershell
+python -m pip install requests
+python -m pip freeze > requirements.txt
+deactivate
+Remove-Item -Recurse -Force .venv
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -c "import requests; print(requests.__version__)"
+```
+### Diagnose three broken setups | debugging
+For each situation, write down the cause and the exact fix. (a) You run `pip install flask`, then `python app.py` fails with `ModuleNotFoundError: No module named 'flask'`. (b) Typing `python` gives `'python' is not recognized`. (c) You committed the `.venv` folder to Git and your repository is 400 MB.
+HINT: For (a), the question is which interpreter each command used. For (c), think about what should be committed instead.
+SOL:
+(a) The bare `pip` and the bare `python` belong to different interpreters, or the environment is not active. Fix: activate `.venv`, then run `python -m pip install flask` and `python app.py` so both use the same interpreter. Confirm with `python -c "import sys; print(sys.executable)"`.
+(b) The interpreter is not on PATH. Fix: reinstall Python with the "add to PATH" option, or use `py`.
+(c) Remove it from tracking with `git rm -r --cached .venv`, add `.venv/` to `.gitignore`, and commit `requirements.txt` instead.
+### Write a setup script | challenge
+Write a PowerShell script `setup.ps1` that creates `.venv` if it does not exist, installs from `requirements.txt` if that file exists, and prints the path of the interpreter it used. It must work without activating the environment.
+HINT: Call `.venv\Scripts\python.exe` directly. Use `Test-Path` to check whether a file or folder exists.
+EXPECT: Running `.\setup.ps1` on a fresh clone builds the environment and prints a path ending in `.venv\Scripts\python.exe`.
+SOL:
+```powershell
+if (-not (Test-Path .venv)) { python -m venv .venv }
+if (Test-Path requirements.txt) { & .\.venv\Scripts\python.exe -m pip install -r requirements.txt }
+& .\.venv\Scripts\python.exe -c "import sys; print(sys.executable)"
+```
+===QUIZ===
+Q: Which statement about **activating** a virtual environment is accurate?
+- It copies a fresh Python interpreter into your current folder
+- It changes PATH and the prompt for that terminal session only, so `python` and `pip` resolve to the environment's copies *
+- It is required before `.venv\Scripts\python.exe` can run at all
+- It permanently edits the system-wide PATH for all terminals
+WHY: Activation is a convenience layer. Because it only edits the current session, a new terminal starts without it. The environment's interpreter is an ordinary file, so calling it by full path works even with no activation.
+Q: You create `.venv` but do **not** activate it, then run `pip install requests`. Where does the package go?
+- Into `.venv`, because the folder exists in the current directory
+- Into whichever interpreter owns the first `pip` on PATH, which is the global one rather than `.venv` *
+- Nowhere, because pip refuses to run outside an environment
+- Into both, so that either interpreter can import it
+WHY: Pip has no idea about the folder in front of you. It installs into the interpreter it belongs to, and without activation that is the global one. This is the classic way people pollute their global Python by accident.
+Q: Which single flag lets `python` run a module as a script, as in `python -m venv .venv`?
+TYPE: -m
+WHY: `-m` means "run library module as a script". The same flag powers `python -m pip`, which guarantees that pip belongs to the interpreter you named.
+Q: Why does this course use `python -m pip install flask` instead of `pip install flask`?
+- It downloads packages faster
+- It guarantees pip is the one belonging to the interpreter you invoked, rather than whichever pip is first on PATH *
+- It avoids needing an internet connection
+- It always installs globally
+WHY: The only difference is which pip runs. `python -m pip` removes any chance that the install lands in a different Python from the one that will run your code.
+Q: A virtual environment is active, and the project lives at `C:\code\hub`. What does this print?
+```powershell
+python -c "import sys; print(sys.prefix)"
+```
+- The folder of the global Python installation
+- `C:\code\hub\.venv` *
+- `C:\code\hub`
+- `C:\Windows\System32`
+WHY: `sys.prefix` is the root of the installation currently in use. With the environment active, `python` resolves to the copy inside `.venv`, so the prefix is the `.venv` folder. Without activation you would see the global path.
+Q: Why should `.venv/` be listed in `.gitignore` rather than committed?
+- Git cannot store folders that contain executables
+- It contains your passwords and API keys
+- It holds machine-specific absolute paths and thousands of regenerable files, while `requirements.txt` is enough to rebuild it *
+- Environments are read-only, so Git cannot track them
+WHY: The environment is an output, like compiled code, and the requirements file is its recipe. Committing the output bloats the repository and breaks on other machines.
+Q: What is the conventional file name that lists a project's dependencies for `pip install -r`?
+TYPE: requirements.txt
+WHY: The name is a convention, so tools and teammates know where to look. `-r` can read any file, but this name is expected everywhere.
+Q: You installed Flask yesterday, yet today `python app.py` raises `ModuleNotFoundError: No module named 'flask'`. What is the most likely cause?
+- Flask removes itself after 24 hours
+- Flask does not support Python 3.14
+- The terminal or editor is running a different interpreter than the one pip installed into, usually because the environment is not active *
+- `requirements.txt` was deleted
+WHY: The error means "the interpreter running this code has no flask in its site-packages". The package exists, just in another interpreter. Check `sys.executable` to see which one is running.
+Q: You must give a teammate an environment that is identical to yours for a deployment. Which route is best, and why?
+- A hand-written file listing only `flask`, because shorter files are more reliable
+- `pip freeze` output with exact versions, because a rebuild then installs the same versions of every package, including hidden dependencies *
+- Zip and send the `.venv` folder, because it contains everything
+- Nothing is needed, because pip always installs identical versions
+WHY: A short hand-written file leaves versions open, so two machines drift apart. Zipping `.venv` fails because the environment contains absolute paths from your machine.
+Q: Which single command leaves a virtual environment and returns the prompt to normal?
+TYPE: deactivate
+WHY: `deactivate` is defined by the activation script, which is why it only exists while an environment is active. It restores PATH and the prompt for that terminal session.
+</script>
 <script>
 const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
@@ -407,12 +657,33 @@ const paint=()=>{$('#tw').innerHTML=tw()};
 function gloss(){return `<dl>${terms().sort((a,b)=>a.t.localeCompare(b.t)).map(x=>`<div><dt>${x.t}</dt><dd>${x.d} <a class="lk" href="#/l/${x.l.id}">${x.l.t}</a></dd></div>`).join('')}</dl>`}
 const deck=()=>terms().sort((a,b)=>(S.fc[a.t]||0)-(S.fc[b.t]||0)||(S.fcT[a.t]||0)-(S.fcT[b.t]||0));
 function cards(){const d=deck(),c=d[0];return `<p class="mu">${d.filter(x=>(S.fc[x.t]||0)>=3).length} of ${d.length} terms mastered. Cards you know well come back last.</p><div class="fcard ${fc.f?'flip':''}" data-act="flip"><span class="mu">${fc.f?'Definition':'Term'}</span><div class="ft">${fc.f?c.d:c.t}</div><span class="mu">${c.l.t}</span></div>${fc.f?'<div class="r2"><button class="gh" data-act="rate" data-r="0">Again</button><button class="btn" data-act="rate" data-r="1">Got it</button></div>':'<p class="mu">Tap the card to reveal the answer.</p>'}`}
-const missed=()=>Object.keys(S.miss).map(k=>{const p=k.split('|'),l=L.find(x=>x.id==p[0]);return l&&l.q[p[1]]?{key:k,q:l.q[p[1]],l}:null}).filter(Boolean);
+const missed=()=>Object.keys(S.miss).map(k=>{const p=k.split('|'),l=L.find(x=>x.id==p[0]);return l&&l.q[p[1]]&&l.q[p[1]][1]?{key:k,q:l.q[p[1]],l}:null}).filter(Boolean);
 function review(){const m=missed();if(!m.length)return '<div class="card"><h3>Nothing to review</h3><p class="mu">Questions you get wrong in a quiz appear here until you answer them correctly.</p></div>';const x=m[0],q=x.q,a=rv.k!=null;
-return `<div class="card"><div class="mu">${m.length} to review, from ${x.l.t}</div><h3>${q[0]}</h3><div class="opts">${q[1].map((o,k)=>`<button class="opt ${a?(k==q[2]?'good':k==rv.k?'bad':''):''}" data-act="rpick" data-k="${k}">${o}</button>`).join('')}</div>${a?'<button class="btn" data-act="rnext">Continue</button>':''}</div>`}
+return `<div class="card"><div class="mu">${m.length} to review, from ${x.l.t}</div>${x.l.rich?md(q[0]):'<h3>'+q[0]+'</h3>'}<div class="opts">${q[1].map((o,k)=>`<button class="opt ${a?(k==q[2]?'good':k==rv.k?'bad':''):''}" data-act="rpick" data-k="${k}">${x.l.rich?inl(o):o}</button>`).join('')}</div>${a?'<button class="btn" data-act="rnext">Continue</button>':''}</div>`}
 function saved(){const b=L.filter(l=>S.bk[l.id]);return b.length?`<div class="ls col">${b.map(l=>`<a href="#/l/${l.id}">${l.t} <span class="mu">Week ${l.w}</span></a>`).join('')}</div>`:'<div class="card"><h3>No saved lessons</h3><p class="mu">Use Save lesson on any lesson page to keep it here.</p></div>'}
 const idx=()=>L.flatMap(l=>[{t:l.t,k:'Lesson',l,x:l.t+' '+l.s.replace(/<[^>]+>/g,'')},...l.tm.map(x=>({t:x[0],k:'Key term',l,x:x[0]+' '+x[1]})),...l.tk.map((x,j)=>({t:'Task '+(j+1),k:'Practice',l,x:x[0].replace(/<[^>]+>/g,'')}))]);
 document.addEventListener('input',e=>{if(e.target.id!='sq')return;const q=e.target.value.trim().toLowerCase(),r=$('#sr');if(q.length<2){r.className='';return}const m=idx().filter(i=>i.x.toLowerCase().includes(q)).slice(0,8);r.className='on';r.innerHTML=m.length?m.map(i=>`<a href="#/l/${i.l.id}"><b>${i.t}</b><span class="mu">${i.k} in ${i.l.t}</span></a>`).join(''):'<p class="mu">No matches. Try another word.</p>'});
+const inl=t=>esc(t).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>'),nm=t=>t.toLowerCase().replace(/[`'"\s]/g,'');
+function md(src){const out=[],ls=src.replace(/\r/g,'').split('\n');let i=0,p=[],hc=0;const fl=()=>{if(p.length){out.push('<p>'+inl(p.join(' '))+'</p>');p=[]}};
+while(i<ls.length){const l=ls[i];
+if(/^```/.test(l)){fl();const c=[];i++;while(i<ls.length&&!/^```/.test(ls[i]))c.push(ls[i++]);out.push(cb(c.join('\n')));i++;continue}
+if(/^## /.test(l)){fl();out.push('<h2 id="h'+hc+++'">'+inl(l.slice(3))+'</h2>')}
+else if(/^### /.test(l)){fl();out.push('<h3>'+inl(l.slice(4))+'</h3>')}
+else if(/^> /.test(l)){fl();out.push('<div class="co">'+inl(l.slice(2))+'</div>')}
+else if(/^- /.test(l)){fl();const u=[];while(i<ls.length&&/^- /.test(ls[i]))u.push('<li>'+inl(ls[i++].slice(2))+'</li>');out.push('<ul>'+u.join('')+'</ul>');continue}
+else if(!l.trim())fl();else p.push(l);i++}
+fl();return out.join('')}
+function pt(b){return b.split(/^### /m).slice(1).map(x=>{const n=x.indexOf('\n'),h=x.slice(0,n).split('|'),r=x.slice(n+1).split(/^(HINT|EXPECT|SOL):/m),g=k=>{const i=r.indexOf(k);return i<0?'':r[i+1].trim()};return [h[0].trim(),r[0].trim(),g('HINT'),g('SOL'),g('EXPECT'),(h[1]||'').trim()]})}
+function pq(b){const q=[];b.split(/^Q:/m).slice(1).forEach(x=>{const z=x.split(/^WHY:/m),st=[],o=[];let a=0,ty=null;z[0].trim().split('\n').forEach(l=>{if(/^- /.test(l)){let t=l.slice(2);if(/ \*$/.test(t)){a=o.length;t=t.slice(0,-2)}o.push(t)}else if(/^TYPE:/.test(l))ty=l.slice(5).trim();else st.push(l)});q.push([st.join('\n').trim(),ty?null:o,ty||a,(z[1]||'').trim()])});return q}
+function loadRich(){L.forEach(l=>{const e=document.getElementById('n-'+l.id);if(!e)return;const p=e.textContent.split(/^===(NOTES|TASKS|QUIZ)===$/m);for(let i=1;i<p.length;i+=2){const k=p[i],t=p[i+1];if(k=='NOTES')l.nb=t.trim();else if(k=='TASKS')l.tk=pt(t);else l.q=pq(t)}l.rich=1})}
+const readRich=l=>`<div class="rd"><article class="notes">${md(l.nb)}</article><aside class="toc"><b>On this page</b>${(l.nb.match(/^## .+$/gm)||[]).map((h,i)=>`<a data-act="jump" data-t="h${i}">${esc(h.slice(3).replace(/^Part \d+: /,''))}</a>`).join('')}</aside></div>`;
+const practiceRich=l=>`<p class="mu">Work in your own editor with AI off. Give each task a real attempt before opening the hint.</p>${l.tk.map((x,j)=>`<div class="card"><div class="mu">Task ${j+1} · ${x[5]}</div><h3>${inl(x[0])}</h3>${md(x[1])}${x[4]?'<p><b>Expected result</b></p>'+md(x[4]):''}<details><summary>Hint</summary>${md(x[2])}</details><details><summary>Solution</summary>${md(x[3])}</details></div>`).join('')}`;
+const quizHtml=l=>{const n=l.q.length,nx=L[L.indexOf(l)+1],R=l.rich,I=t=>R?inl(t):t;
+if(qs.i>=n){const pc=Math.round(qs.ok/n*100),pass=pc>=70;return `<div class="card"><h3>${pass?'Quiz passed':'Not quite yet'}</h3><p>${qs.ok} of ${n} correct (${pc}%). ${pass?'':'You need 70% to pass. Review the notes and try again.'}</p>${pass?(nx?`<a class="btn" href="#/l/${nx.id}">Next lesson</a>`:''):'<button class="btn" data-act="retry">Try again</button>'}</div>`}
+const q=l.q[qs.i],a=qs.k!=null,ty=q[1]===null,ok=ty?qs.good:qs.k==q[2];
+const body=ty?(a?`<p class="${ok?'ok':'bad2'}">${ok?'Correct.':'Not quite. Accepted answer: <code>'+esc(q[2].split('|')[0].trim())+'</code>'}</p>`:'<input id="ta" class="ti" placeholder="Type your answer" autocomplete="off"><button class="btn" data-act="tsub">Check</button>'):`<div class="opts">${q[1].map((o,k)=>`<button class="opt ${a?(k==q[2]?'good':k==qs.k?'bad':''):''}" data-act="pick" data-k="${k}">${I(o)}</button>`).join('')}</div>`;
+return `<div class="card"><div class="mu">Question ${qs.i+1} of ${n}${ty?' · typed answer':''}</div><div class="qs">${R?md(q[0]):'<h3>'+q[0]+'</h3>'}</div>${body}${a?(ty?'':`<p class="${ok?'ok':'mu'}">${ok?'Correct.':'The answer is: '+I(q[1][q[2]])}</p>`)+(q[3]?'<div class="co">'+I(q[3])+'</div>':'')+`<button class="btn" data-act="next">${qs.i+1<n?'Next question':'See result'}</button>`:''}</div>`};
+document.addEventListener('keydown',e=>{if(e.key=='Enter'&&e.target.id=='ta'){const b=document.querySelector('[data-act=tsub]');b&&b.click()}});
 function prog(){const s=new Date();s.setDate(s.getDate()-((s.getDay()+6)%7)-77);const t=today();let c='';
 for(let i=0;i<84;i++){const k=ds(s),m=(S.log[k]||0)/60,lv=!m?0:m<10?1:m<30?2:m<60?3:4;c+=`<i class="h${lv}${k>t?' f':''}" title="${k}: ${Math.round(m)} min"></i>`;s.setDate(s.getDate()+1)}
 const bs=[['First lesson',nd()>0],['Week 1 complete',L.filter(l=>l.w==1).every(l=>S.done[l.id])],['3-day streak',streak()>=3],['7-day streak',streak()>=7],['5 hours in a week',weekSecs()>=18000]];
@@ -422,16 +693,12 @@ function lesson(l){S.last=l.id;save();const i=L.indexOf(l),p=L[i-1],n=L[i+1];
 return `<div class="mu">Week ${l.w}, lesson ${L.filter(x=>x.w==l.w).indexOf(l)+1} of 5</div><h1>${l.t}</h1><div class="chips"><button class="gh bk ${S.bk[l.id]?'on':''}" data-act="bk">${ic('mark')}<span>${S.bk[l.id]?'Saved':'Save lesson'}</span></button><span class="chip" id="cv"></span><span class="chip" id="cq"></span><span class="chip" id="cd"></span></div>
 <div class="tabs">${[['watch','Watch'],['read','Read'],['practice','Practice'],['quiz','Quiz']].map(t=>`<button data-act="tab" data-t="${t[0]}" id="t-${t[0]}">${t[1]}</button>`).join('')}</div><div id="tp"></div>
 <div class="nav">${p?`<a class="btn2" href="#/l/${p.id}">Previous: ${p.t}</a>`:'<span></span>'}${n?`<a class="btn2" href="#/l/${n.id}">Next: ${n.t}</a>`:'<span></span>'}</div>`}
-function panel(l,t){
+function panel(l,t){if(l.rich&&t=='read')return readRich(l);if(l.rich&&t=='practice')return practiceRich(l);
 if(t=='watch'&&l.nv)return '<div class="card"><h3>This lesson is read-first</h3><p class="mu">'+(l.nvm||'There is no video for this one. Work through the notes on the Read tab.')+'</p><button class="btn" data-act="tab" data-t="read">Start reading</button></div>';
 if(t=='watch')return `<div class="vid"><div id="pl"></div></div>${vl(l)}<a class="lnk" id="yl" target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=${l.v}">Open on YouTube</a><a class="lnk" data-act="watched">Video not tracking? Mark as watched</a>`;
 if(t=='read')return `<div class="rd"><article><section id="s-sum"><h2>Summary</h2><p>${l.s}</p><details><summary>Go deeper</summary>${l.d}</details></section><section id="s-terms"><h2>Key terms</h2><dl>${l.tm.map(x=>`<dt>${x[0]}</dt><dd>${x[1]}</dd>`).join('')}</dl></section><section id="s-code"><h2>Code</h2>${cb(l.c)}</section></article><aside class="toc"><b>On this page</b><a data-act="jump" data-t="s-sum">Summary</a><a data-act="jump" data-t="s-terms">Key terms</a><a data-act="jump" data-t="s-code">Code</a></aside></div>`;
 if(t=='practice')return `<p class="mu">Solve these in your own editor with AI off. Open the hint only after you have tried.</p>${l.tk.map((x,j)=>`<div class="card"><h3>Task ${j+1}</h3><p>${x[0]}</p><details><summary>Hint</summary><p>${x[1]}</p></details><details><summary>Solution</summary>${cb(x[2])}</details></div>`).join('')}`;
 return quizHtml(l)}
-function quizHtml(l){const n=l.q.length,nx=L[L.indexOf(l)+1];
-if(qs.i>=n){const pc=Math.round(qs.ok/n*100),pass=pc>=70;return `<div class="card"><h3>${pass?'Quiz passed':'Not quite yet'}</h3><p>${qs.ok} of ${n} correct (${pc}%). ${pass?'':'You need 70% to pass. Review the notes and try again.'}</p>${pass?(nx?`<a class="btn" href="#/l/${nx.id}">Next lesson</a>`:''):'<button class="btn" data-act="retry">Try again</button>'}</div>`}
-const q=l.q[qs.i],a=qs.k!=null;
-return `<div class="card"><div class="mu">Question ${qs.i+1} of ${n}</div><h3>${q[0]}</h3><div class="opts">${q[1].map((o,k)=>`<button class="opt ${a?(k==q[2]?'good':k==qs.k?'bad':''):''}" data-act="pick" data-k="${k}">${o}</button>`).join('')}</div>${a?`<p class="${qs.k==q[2]?'ok':'mu'}">${qs.k==q[2]?'Correct.':'The answer is: '+q[1][q[2]]}</p><button class="btn" data-act="next">${qs.i+1<n?'Next question':'See result'}</button>`:''}</div>`}
 function setTab(t){const l=cur();if(!l)return;try{yt&&yt.destroy&&yt.destroy()}catch(e){}yt=null;clearInterval(poll);if(t=='quiz')qs={i:0,ok:0,k:null};
 const tp=$('#tp');tp.className='';void tp.offsetWidth;tp.className='view';tp.innerHTML=panel(l,t);document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));if(t=='watch'&&!l.nv)mount(l);status()}
 function side(){const h=location.hash,cw=(L.find(l=>'#/l/'+l.id==h)||L[0]).w;let o=`<a class="brand" href="#/"><img src="favicon.svg" width="30" height="30" alt=""><span>PythonHub</span></a><nav class="sn">${[['#/','home','Home'],['#/roadmap','road','Roadmap'],['#/tools','study','Study tools'],['#/progress','prog','Progress']].map(x=>`<a href="${x[0]}" class="${(x[0]=='#/'?(h==''||h=='#/'):h.startsWith(x[0]))?'on':''}">${ic(x[1])}<span>${x[2]}</span></a>`).join('')}</nav>`;
@@ -473,11 +740,12 @@ else if(t=='rpick'){if(rv.k==null){const x=missed()[0];rv.k=+a.dataset.k;rv.ok=r
 else if(t=='rnext'){const x=missed()[0];delete S.miss[x.key];if(!rv.ok)S.miss[x.key]=1;rv={k:null,ok:0};save();paint()}
 else if(t=='bk'){const id=cur().id;S.bk[id]=!S.bk[id];if(!S.bk[id])delete S.bk[id];save();a.classList.toggle('on',!!S.bk[id]);a.querySelector('span').textContent=S.bk[id]?'Saved':'Save lesson'}
 else if(t=='pv'){play(vids(cur())[+a.dataset.i])}
+else if(t=='tsub'){const l=cur(),q=l.q[qs.i],v=nm($('#ta').value);if(!v)return;qs.good=q[2].split('|').some(x=>nm(x)==v);qs.k=0;const key=l.id+'|'+qs.i;if(qs.good){qs.ok++;delete S.miss[key]}else S.miss[key]=1;save();$('#tp').innerHTML=quizHtml(l)}
 else if(t=='jump')document.getElementById(a.dataset.t).scrollIntoView({behavior:'smooth',block:'start'})
 else if(t=='watched'){vids(cur()).forEach(x=>S.watched[x]=1);save();status()}});
 document.addEventListener('change',e=>{if(e.target.id=='im'){const f=e.target.files[0];f&&f.text().then(x=>{try{Object.assign(S,JSON.parse(x));save();route();toast('Progress imported')}catch(err){alert('That file is not a valid PythonHub export.')}})}});
 let tick=0;setInterval(()=>{if(curId&&!document.hidden){S.time[curId]=(S.time[curId]||0)+1;S.log[today()]=(S.log[today()]||0)+1;if(++tick%15==0)save()}},1000);
-window.addEventListener('hashchange',route);document.documentElement.dataset.theme=S.theme;chrome();route();
+loadRich();window.addEventListener('hashchange',route);document.documentElement.dataset.theme=S.theme;chrome();route();
 const ys=document.createElement('script');ys.src='https://www.youtube.com/iframe_api';document.head.appendChild(ys);
 </script>
 </body>
