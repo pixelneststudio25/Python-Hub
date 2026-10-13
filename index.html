@@ -3210,6 +3210,474 @@ Q: Which exception does `open("missing.txt")` raise when the file does not exist
 TYPE: FileNotFoundError
 WHY: It is a subclass of `OSError`. You can catch it specifically and decide whether to create a default or stop.
 </script>
+<script type="text/markdown" id="n-3-1">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to take any web address apart and say what each piece means, describe what a browser and a server say to each other during one page visit, choose the right HTTP method for an action and explain why, read status codes by family and by common number, explain why HTTP being stateless is the reason cookies exist, and inspect real requests in your browser and in Python.
+
+## Part 1: Clients, servers, and a URL
+The web is a conversation. A **client** (usually your browser) asks for something, and a **server** (a program on another computer, which will soon be your Flask app) answers. Every exchange has the same two halves: a **request** from the client and a **response** from the server. The rules for how they are written are called **HTTP** (HyperText Transfer Protocol).
+
+First, the address. Take this URL and break it up:
+```
+https://hub.example:8000/lessons/3?page=2&sort=asc#intro
+```
+- `https` is the **scheme**, the protocol. HTTPS is HTTP with encryption added.
+- `hub.example` is the **host**, which DNS translates into a numeric IP address.
+- `:8000` is the **port**, a numbered door on that machine. If omitted, HTTP uses 80 and HTTPS uses 443.
+- `/lessons/3` is the **path**, which says which resource you want. Flask routes on this.
+- `?page=2&sort=asc` is the **query string**, extra named values after a `?`, separated by `&`.
+- `#intro` is the **fragment**. It is used only by the browser to scroll to a section and is **never sent to the server**.
+
+## Part 2: What a request and a response look like
+Underneath, both are plain text. A request:
+```
+GET /lessons/3?page=2 HTTP/1.1
+Host: hub.example
+Accept: text/html
+Cookie: session=abc123
+```
+The first line is the **request line**: the **method** (what to do), the path with its query, and the HTTP version. The following lines are **headers**: labelled pieces of metadata. `Host` names the site, `Accept` says which formats the client understands, and `Cookie` returns data the server stored earlier. Some requests also carry a **body** after a blank line, such as the data from a submitted form.
+
+The server's response has the same shape:
+```
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Set-Cookie: session=abc123
+
+<h1>Lesson 3</h1>
+```
+The first line is the **status line**, with a numeric **status code** and a short reason. The headers describe the content (`Content-Type` tells the browser how to display it). After the blank line comes the **body**, the actual page. In Flask, the string your view returns becomes the body, and Flask fills in the status and headers for you.
+
+## Part 3: Methods, and why the choice matters
+The **method** states the intent of a request:
+- `GET`: fetch something. It must not change anything on the server.
+- `POST`: send data to be processed, such as submitting a form or creating an account.
+- `PUT` / `PATCH`: replace or partially update an existing item.
+- `DELETE`: remove an item.
+
+The rule that matters most: **GET must be safe.** Browsers, search engines and link-preview tools freely request GET URLs, sometimes in advance, without you clicking. If a link like `/delete-account` used GET, a crawler or a prefetching browser could trigger it. State-changing actions use POST (or the other methods), which a browser only sends when a form or script deliberately does it.
+
+A second practical difference: a GET form puts its data in the URL (`?email=a@b.com`), where it lands in history, bookmarks and server logs. A POST form puts it in the body. That is why a password form must never use GET.
+
+## Part 4: Status codes
+The first digit tells you the family:
+- **2xx success:** `200 OK`, `201 Created`.
+- **3xx redirection:** `301` (moved permanently), `302` (moved temporarily). The response includes a `Location` header, and the browser goes there.
+- **4xx client error, the request was wrong:** `400 Bad Request`, `401 Unauthorized` (you are not identified, so log in), `403 Forbidden` (we know who you are, but you may not), `404 Not Found`, `405 Method Not Allowed` (that URL exists but not for this method).
+- **5xx server error, our code failed:** `500 Internal Server Error`.
+
+The split between 4xx and 5xx is a debugging compass. A 404 means check the URL and your routes. A 500 means a bug, probably an unhandled exception in your Python, and the Flask terminal shows its traceback.
+
+## Part 5: Stateless, and the cookie workaround
+**HTTP is stateless**: the server treats every request as a stranger. It does not remember that you logged in one second ago. Websites solve this with a **cookie**: the server includes a `Set-Cookie` header in a response, the browser stores it, and then sends it back in a `Cookie` header on every later request to that site. The cookie carries an identifier, so the server can recognise you. Logins, shopping carts and "remember me" are all built on this, and you will implement it in Week 4.
+
+## Part 6: Seeing it for yourself
+Open any website, press **F12**, choose the **Network** tab, refresh, and click a request. You will see the method, status code and headers exactly as described. From Python you can do the same with the `requests` library:
+```python
+import requests
+
+r = requests.get("https://example.com")
+print(r.status_code)                 # 200
+print(r.headers["Content-Type"])     # text/html
+print(r.text[:60])                   # the start of the body
+```
+In PowerShell, `curl.exe -i https://example.com` prints the raw status line and headers. (Use `curl.exe`, because plain `curl` is an alias for a different PowerShell command.)
+
+## Part 7: How this connects to Flask
+Everything in this lesson appears in your Flask code. `@app.route("/lessons")` matches the **path**. A view's return value becomes the **body**, and `return "Not found", 404` sets the **status**. In views you will read the method with `request.method` and the query string with `request.args`, and `redirect()` produces a 3xx response. Flask is a tool for writing HTTP responses, so now you know exactly what it is writing.
+
+## Recap
+- URL = scheme, host, port, path, query, fragment. The fragment never reaches the server.
+- A request has a method, path, headers and an optional body; a response has a status, headers and a body.
+- GET reads and must be safe; POST and the others change things.
+- 2xx success, 3xx redirect, 4xx client error, 5xx server error.
+- HTTP is stateless, so cookies carry identity between requests.
+===TASKS===
+### Inspect a real request | guided
+Open any website, press F12, open the Network tab, and refresh. Choose one request and write down its method, status code, the `Content-Type` response header, and one request header. Then find a request whose status is not 200 if you can.
+HINT: Click a row, then look under Headers. Filtering by "Doc" shows the page request itself.
+EXPECT: For the page itself, you will usually see method `GET`, status `200`, and `Content-Type: text/html`.
+SOL:
+Example answer: method GET, status 200, response header `Content-Type: text/html; charset=utf-8`, request header `Accept: text/html,...`. A non-200 example might be a `304 Not Modified`, meaning the browser's cached copy is still valid.
+### Make a request in Python | guided
+Install `requests` in your venv. Fetch `https://example.com` and print the status code, the `Content-Type` header, and the length of the body. Then fetch `https://example.com/does-not-exist` and print that status code.
+HINT: `r.headers` behaves like a dictionary.
+EXPECT: `200`, a content type containing `text/html`, a length, and then `404`.
+SOL:
+```python
+import requests
+
+r = requests.get("https://example.com")
+print(r.status_code, r.headers["Content-Type"], len(r.text))
+print(requests.get("https://example.com/does-not-exist").status_code)
+```
+### Take a URL apart | independent
+Using `urllib.parse`, write a function `describe(url)` that returns a dictionary with the scheme, host, port, path and the query as a dictionary. Test it with the asserts below.
+HINT: `urlparse` splits the URL and `parse_qs` converts the query string to a dictionary of lists.
+EXPECT: The asserts pass.
+SOL:
+```python
+from urllib.parse import urlparse, parse_qs
+
+def describe(url):
+    u = urlparse(url)
+    return {
+        "scheme": u.scheme,
+        "host": u.hostname,
+        "port": u.port,
+        "path": u.path,
+        "query": parse_qs(u.query),
+    }
+
+d = describe("https://hub.example:8000/lessons/3?page=2&sort=asc#intro")
+assert d["scheme"] == "https" and d["host"] == "hub.example"
+assert d["port"] == 8000 and d["path"] == "/lessons/3"
+assert d["query"] == {"page": ["2"], "sort": ["asc"]}
+```
+### Diagnose three situations | debugging
+(a) A login form sends the password as part of the URL. (b) A request returns `405 Method Not Allowed` on a page that opens fine in the browser. (c) One page shows `404` and another `500`. For each, say what it tells you and where you would look first.
+HINT: (a) concerns the method, (b) concerns what the URL accepts, and (c) concerns which side made the mistake.
+SOL:
+(a) The form uses GET. Change it to POST so the data goes in the body, which also keeps it out of history and logs.
+(b) The URL exists, but not for the method used. Browsers open pages with GET, so the route probably only allows POST. Check the `methods` of the route.
+(c) 404 is a client-side problem: no route or resource matches the URL, so check the path and the routes. 500 is a server-side bug: read the traceback in the Flask terminal.
+### Parse a raw response | challenge
+Write `parse_response(raw)` that takes a raw HTTP response string (lines separated by `\r\n`) and returns a tuple `(status_code, headers, body)`, where headers is a dictionary with lowercase names.
+HINT: Split the head from the body at the first blank line using `partition("\r\n\r\n")`, and split the status line on spaces with at most two splits.
+EXPECT: The asserts pass.
+SOL:
+```python
+def parse_response(raw):
+    head, _, body = raw.partition("\r\n\r\n")
+    lines = head.split("\r\n")
+    version, code, reason = lines[0].split(" ", 2)
+    headers = {}
+    for line in lines[1:]:
+        name, _, value = line.partition(":")
+        headers[name.strip().lower()] = value.strip()
+    return int(code), headers, body
+
+raw = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<h1>Hi</h1>"
+assert parse_response(raw) == (200, {"content-type": "text/html"}, "<h1>Hi</h1>")
+```
+===QUIZ===
+Q: In the URL `https://hub.example:8000/lessons?page=2#intro`, which parts are sent to the server in the request?
+- Everything, including `#intro`
+- The path and query string, but not the fragment `#intro` *
+- Only the host name
+- Only the path
+WHY: The fragment is used by the browser alone, for example to scroll to a heading. The path and query travel in the request line.
+Q: Which status code means the requested page was not found?
+TYPE: 404
+WHY: 404 is a client error: the URL did not match anything. A 500 would mean the server itself failed.
+Q: What is the difference between `401` and `403`?
+- 401 means a server crash and 403 means a missing page
+- 401 means you are not identified (log in), while 403 means you are identified but not allowed *
+- They are identical
+- 403 means the page moved
+WHY: The two codes describe different problems. 401 asks for credentials, and 403 refuses even though the server knows who you are.
+Q: Why should an action such as deleting an account not be triggered by a GET request?
+- GET requests are slower
+- GET is expected to be safe, and browsers and crawlers may request GET URLs without a deliberate click *
+- GET cannot carry a URL
+- Browsers block GET requests that contain the word delete
+WHY: Prefetching, link previews and crawlers all issue GET requests freely, so a destructive GET can fire by accident.
+Q: In the request line `POST /login HTTP/1.1`, what is `/login`?
+- The method
+- The path of the requested resource *
+- The HTTP version
+- A header
+WHY: The request line has three parts in order: method, path (with query), version.
+Q: Which response header tells the browser to store a cookie?
+TYPE: Set-Cookie
+WHY: The browser saves the cookie and sends it back in a `Cookie` header on later requests to the same site.
+Q: What does it mean that HTTP is stateless, and what follows from it?
+- The server cannot send data
+- Each request is independent, so identity must be sent again on every request, usually in a cookie *
+- Requests are not encrypted
+- The server remembers every visitor automatically
+WHY: With no built-in memory, a site recognises you only because the browser sends an identifying cookie each time.
+Q: What does a `302` status with a `Location` header make the browser do?
+- Show an error page
+- Go to the new URL, as a temporary redirect *
+- Cache the page forever
+- Retry the same request
+WHY: 3xx codes are redirects. 302 is temporary, while 301 tells clients the move is permanent.
+Q: A request is valid, but a bug in your Python code raises an exception. Which status does the server normally return?
+- 400
+- 404
+- 500 *
+- 301
+WHY: 5xx codes mean the server failed. The traceback in the terminal tells you what went wrong.
+Q: What is the default port of Flask's development server?
+TYPE: 5000
+WHY: Flask prints a line like `Running on http://127.0.0.1:5000`. You can change it with the `--port` option.
+</script>
+<script type="text/markdown" id="n-3-2">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to set up a Flask project from nothing, explain every line of a minimal app, run it in two different ways and say how they differ, explain what debug mode does and why it must never be switched on in production, return text, HTML, tuples and dictionaries from views, test your app from Python without opening a browser, and diagnose the four setup errors that stop most beginners.
+
+## Part 1: Setting up
+Everything from Lesson 1-1 pays off now. In PowerShell:
+```powershell
+mkdir hub-v0
+cd hub-v0
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.venv\Scripts\Activate.ps1
+python -m pip install flask
+python -m pip freeze > requirements.txt
+```
+Then create a file called `app.py` in that folder. A warning that saves hours: **never name your file `flask.py`.** Python searches the current folder first, so your file would shadow the real library and you would get an import error.
+
+## Part 2: The smallest Flask app
+```python
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Hello from PythonHub"
+
+if __name__ == "__main__":
+    app.run(debug=True)
+```
+Take it line by line:
+- `from flask import Flask` imports the class that represents a web application.
+- `app = Flask(__name__)` creates an **instance** of that class (Lesson 2-1). `__name__` is the module-name variable from Lesson 2-4. Flask uses it to know where your file lives, so it can find the `templates` and `static` folders next to it.
+- `@app.route("/")` is a **decorator with an argument** (Lesson 1-5). It registers the function below as the handler for the path `/`. Without it, the function exists but no URL leads to it.
+- `def home():` is the **view function**. Its name is also the route's identity, which is why `url_for("home")` will work later. Names must be unique.
+- `return "Hello from PythonHub"` sends the response body. Flask adds the status `200 OK` and a `text/html` content type automatically.
+- The guard `if __name__ == "__main__":` runs `app.run` only when you execute the file directly, which is the same guard you learned last week.
+
+## Part 3: Running it, two routes
+**Route A, run the file:** `python app.py`. The `app.run(debug=True)` line starts the server.
+
+**Route B, use the Flask command:** `flask --app app run --debug`. Here `--app app` means "the module named `app`", which is your `app.py`. With this route you do not need the `app.run` line at all, and it is the form recommended in current documentation. Older tutorials set an environment variable instead (`$env:FLASK_APP="app.py"`), and both work.
+
+Either way you will see something like:
+```
+* Running on http://127.0.0.1:5000
+```
+`127.0.0.1` is the address that always means "this computer" (also called `localhost`), and `5000` is the port. Open that address in your browser to see your page. Stop the server with **Ctrl+C**. If port 5000 is busy you get "Address already in use", and you can pick another with `--port 5001`.
+
+## Part 4: Debug mode
+`debug=True` (or `--debug`) switches on two helpers:
+- The **reloader** restarts the server every time you save a file, so you see changes at once.
+- The **debugger** shows an interactive traceback page in the browser when a view raises an exception.
+
+The debugger is powerful enough to execute Python code on your machine. That is perfect on your laptop and **dangerous on a public server**, because anyone who could reach it could run code. Never deploy with debug on. In Week 11 you will run a proper production server instead.
+
+## Part 5: What happens when you visit a page
+1. Your browser sends `GET /` to `127.0.0.1:5000`.
+2. Flask's server receives the request and looks for a route matching the path.
+3. It finds `home` and calls it.
+4. Flask turns the returned value into a response and sends it back.
+
+Visit `/missing` and Flask finds no matching route, so it answers with **404 Not Found** automatically. Raise an exception inside a view and you get a **500**, with the traceback in your terminal.
+
+## Part 6: What a view can return
+```python
+@app.route("/html")
+def html():
+    return "<h1>Big title</h1><p>The browser renders this.</p>"
+
+@app.route("/created")
+def created():
+    return "Made it", 201               # a tuple: (body, status code)
+
+@app.route("/api/status")
+def status():
+    return {"status": "ok", "lessons": 60}   # a dict becomes JSON
+```
+A string is sent as HTML, so tags render. A tuple lets you set the status code. A dictionary is converted to JSON with the right `Content-Type`, which is how you will build APIs in Week 9. Returning nothing at all (`None`) is an error, so every path through a view must return something. This is the same print-versus-return lesson from Week 1: printing in a view shows text in your terminal, not in the browser.
+
+## Part 7: Testing without a browser
+Flask gives you a **test client**, a fake browser that calls your app directly:
+```python
+client = app.test_client()
+resp = client.get("/api/status")
+print(resp.status_code)        # 200
+print(resp.get_json())         # {'status': 'ok', 'lessons': 60}
+```
+This is how professionals test: repeatable, fast, and with no server running. You will use it with `assert` all through the course.
+
+## Part 8: The four errors that stop beginners
+- **`ModuleNotFoundError: No module named 'flask'`:** the virtual environment is not active, or Flask is not installed in it. Activate `.venv` and run `python -m pip install flask`.
+- **`Address already in use`:** another program, often an earlier copy of your own server, holds the port. Close it or use `--port 5001`.
+- **`ImportError: cannot import name 'Flask' from partially initialized module 'flask'`:** you named your file `flask.py`. Rename it.
+- **`Error: Could not locate a Flask application`:** `flask run` could not find your app. Add `--app app` so it knows which module to load.
+
+## Recap
+- A Flask app is an instance of `Flask`, created with `Flask(__name__)`.
+- `@app.route(path)` registers a view function for a URL path, and the view's return value becomes the response.
+- Run it with `python app.py` or `flask --app app run --debug`. The address is `http://127.0.0.1:5000`.
+- Debug mode gives auto-reload and an interactive debugger, and must never be used in production.
+- Strings return HTML, tuples set the status code, dictionaries become JSON, and the test client lets you check all of it with code.
+===TASKS===
+### Run your first app | guided
+Create `hub-v0` with a virtual environment, install Flask, and write the minimal app with your own name in the greeting. Run it with `python app.py`, open it in the browser, then stop it and run it again with `flask --app app run --debug`.
+HINT: If the page does not load, check that the terminal shows `Running on http://127.0.0.1:5000` and that you typed that exact address.
+EXPECT: Your greeting appears in the browser both times.
+SOL:
+```python
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Hello, I am learning Flask"
+
+if __name__ == "__main__":
+    app.run(debug=True)
+```
+### Return different things | guided
+Add three routes: `/html` returning an `<h1>`, `/created` returning the text `Made it` with status 201, and `/api/status` returning a dictionary. In PowerShell, run `curl.exe -i http://127.0.0.1:5000/created` and read the first line of the output.
+HINT: A tuple return is `(body, status)`.
+EXPECT: The first line of the curl output is `HTTP/1.1 201 CREATED`.
+SOL:
+```python
+@app.route("/html")
+def html():
+    return "<h1>Big title</h1>"
+
+@app.route("/created")
+def created():
+    return "Made it", 201
+
+@app.route("/api/status")
+def api_status():
+    return {"status": "ok"}
+```
+### Test with the test client | independent
+Add a route `/ping` that returns the dictionary `{"pong": True}`. Then, in a separate file `test_app.py`, use `app.test_client()` to assert that `/ping` returns status 200 and the right JSON, and that `/nope` returns 404.
+HINT: Import your app with `from app import app`, and use `resp.get_json()` to read the JSON.
+EXPECT: Running `python test_app.py` prints nothing and raises no error.
+SOL:
+```python
+# app.py (add)
+@app.route("/ping")
+def ping():
+    return {"pong": True}
+
+# test_app.py
+from app import app
+
+client = app.test_client()
+resp = client.get("/ping")
+assert resp.status_code == 200
+assert resp.get_json() == {"pong": True}
+assert client.get("/nope").status_code == 404
+```
+### Diagnose four errors | debugging
+Name the cause and the fix for each: (a) `ModuleNotFoundError: No module named 'flask'`, (b) `Address already in use`, (c) `cannot import name 'Flask' from partially initialized module 'flask'`, (d) `Could not locate a Flask application`.
+HINT: (a) and (c) are about which Python or which file is being imported, and (b) and (d) are about the running server.
+SOL:
+(a) The venv is not active or Flask is not installed in it. Activate it and run `python -m pip install flask`.
+(b) The port is in use, often by an older copy of your server. Stop that one or use `--port 5001`.
+(c) Your file is named `flask.py` and shadows the library. Rename it.
+(d) The `flask` command cannot find your module. Use `flask --app app run`.
+### Hub v0 skeleton | challenge
+Create three routes for the first version of your hub: `/` (a welcome heading), `/lessons` (an HTML list of three lesson titles built from a Python list), and `/about`. Add a custom 404 page with `@app.errorhandler(404)` that returns a friendly message and the 404 status. Verify everything with the test client.
+HINT: Build the list HTML with `"".join(...)` inside the view, and have the error handler return a tuple `(message, 404)`.
+EXPECT: The asserts below pass.
+SOL:
+```python
+from flask import Flask
+
+app = Flask(__name__)
+LESSONS = ["Setup", "Functions", "Classes"]
+
+@app.route("/")
+def home():
+    return "<h1>Welcome to PythonHub</h1>"
+
+@app.route("/lessons")
+def lessons():
+    items = "".join(f"<li>{title}</li>" for title in LESSONS)
+    return f"<h1>Lessons</h1><ul>{items}</ul>"
+
+@app.route("/about")
+def about():
+    return "<h1>About</h1><p>Built while learning Flask.</p>"
+
+@app.errorhandler(404)
+def not_found(error):
+    return "<h1>Page not found</h1>", 404
+
+client = app.test_client()
+assert b"Welcome" in client.get("/").data
+assert b"Functions" in client.get("/lessons").data
+resp = client.get("/nope")
+assert resp.status_code == 404 and b"not found" in resp.data
+```
+===QUIZ===
+Q: What does `@app.route("/")` do?
+- Starts the development server
+- Registers the function below it as the handler for the path `/` *
+- Creates a new Flask application
+- Defines a database table
+WHY: It is a decorator with an argument. It stores the function in Flask's URL table and returns the function unchanged.
+Q: What value do you pass as the first argument to `Flask(...)`?
+TYPE: __name__
+WHY: Flask uses it to find where your module lives, so it can locate the `templates` and `static` folders.
+Q: What does the browser receive from this view?
+```python
+@app.route("/made")
+def made():
+    return "created", 201
+```
+- A 200 response with the body `created, 201`
+- A 201 response with the body `created` *
+- A 500 error
+- A 404 response
+WHY: A returned tuple is `(body, status)`. Flask uses the second item as the status code.
+Q: Why must debug mode never be enabled on a public server?
+- It makes pages load more slowly
+- The debugger can let anyone who reaches it run code on the server *
+- It deletes log files
+- It disables HTTPS
+WHY: The interactive debugger executes Python on the machine. That is useful for you locally and a serious hole on a public site.
+Q: You save your own file as `flask.py` and run it. What happens?
+- It runs normally
+- An `ImportError` about `Flask` and a partially initialized module, because your file shadows the library *
+- Flask renames it for you
+- The server starts on port 80
+WHY: Python searches the current folder before installed packages, so `import flask` loads your own file.
+Q: Which address always refers to your own computer?
+TYPE: 127.0.0.1
+WHY: It is the loopback address, also called `localhost`. Traffic to it never leaves your machine.
+Q: What status does Flask send when no route matches the requested path?
+- 200
+- 404 *
+- 405
+- 500
+WHY: A missing route is a client-side error. Flask answers 404 on its own, and you can customise the page with an error handler.
+Q: What does this view send to the browser?
+```python
+@app.route("/data")
+def data():
+    return {"a": 1}
+```
+- The text `{'a': 1}` as HTML
+- JSON, with a `Content-Type` of `application/json` *
+- A 500 error, because a dictionary is not allowed
+- Nothing
+WHY: Flask converts a dictionary return value into a JSON response automatically.
+Q: In `flask --app app run --debug`, what does the second word `app` refer to?
+- The Flask object's class
+- The module (file `app.py`) that contains your application *
+- The folder name
+- The port number
+WHY: `--app` takes the name of the module to import, and Flask looks inside it for an object named `app`.
+Q: When you see "Address already in use", which option do you change to start the server on a different one?
+TYPE: port | --port
+WHY: Another process holds port 5000. `--port 5001` or `app.run(port=5001)` moves your server.
+</script>
 <script>
 const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
@@ -3291,21 +3759,21 @@ tm:[['HTTP request','A message from a client asking a server for something: meth
 c:'GET /lessons/1 HTTP/1.1\nHost: pythonhub.example\nAccept: text/html\n\nHTTP/1.1 200 OK\nContent-Type: text/html\n\n<h1>Lesson 1</h1>',
 tk:[['Open your browser’s developer tools (Network tab), load any website, and find one request. Write down its method, status code and one response header.','Press F12, open Network, refresh the page and click a row.','Example answer:\nMethod: GET\nStatus: 200\nHeader: Content-Type: text/html'],['Use the <code>requests</code> library to fetch <code>https://example.com</code> and print the status code and the first 100 characters of the body.','Install it inside your venv with <code>pip install requests</code>.','import requests\n\nr = requests.get("https://example.com")\nprint(r.status_code)\nprint(r.text[:100])']],
 q:[['Which status code means "not found"?',['200','404','500'],1],['What does it mean that HTTP is stateless?',['Each request is independent of earlier ones','The server never responds','Requests are always encrypted'],0],['Which method is normally used to submit a form that creates data?',['GET','POST','HEAD'],1]]},
-{id:'3-2',w:3,t:'Your first Flask project',v:'flask1',nv:1,nvm:'The video link for this lesson has not been added yet. Work through the notes on the Read tab for now.',
+{id:'3-2',w:3,t:'Your first Flask project',v:'o3bCVqF9gI0',
 s:'A Flask app is a Python object created with <code>Flask(__name__)</code>. You register <b>view functions</b> on URLs with <code>@app.route</code>, and whatever a view returns becomes the response. Running the app starts a development server that reloads when you save.',
 d:'<p>Debug mode reloads on every save and shows an interactive traceback, but <b>never</b> enable it on a public server. Install Flask inside your venv, and never name your own file <code>flask.py</code>, because it would shadow the library.</p><p>The decorator <code>@app.route</code> is the same decorator pattern from Week 1. It registers your function; it does not change how it behaves.</p>',
 tm:[['Flask app','The object that receives requests and routes them to your functions.'],['View function','A function that handles a URL and returns a response.'],['Development server','A small built-in server for testing on your own machine.'],['Debug mode','Auto-reload plus a detailed error page; for development only.']],
 c:'from flask import Flask\n\napp = Flask(__name__)\n\n@app.route("/")\ndef home():\n    return "Hello from PythonHub"\n\nif __name__ == "__main__":\n    app.run(debug=True)',
 tk:[['Create a project folder with a venv, install Flask, and run an app that returns your name on the home page. Open it at <code>http://127.0.0.1:5000</code>.','Activate the venv first, then <code>pip install flask</code>.','from flask import Flask\n\napp = Flask(__name__)\n\n@app.route("/")\ndef home():\n    return "Your name here"\n\nif __name__ == "__main__":\n    app.run(debug=True)'],['Add an <code>/about</code> route that returns a short sentence, then edit the sentence and watch the page reload.','Debug mode must be on for auto-reload.','@app.route("/about")\ndef about():\n    return "Built while learning Flask."']],
 q:[['What does <code>@app.route("/")</code> do?',['Connects a URL to a view function','Starts the server','Creates a database'],0],['What does a view function return?',['The response sent to the browser','The port number','The Flask version'],0],['Where is it unsafe to enable debug mode?',['On a public server','On your own laptop','In tests'],0]]},
-{id:'3-3',w:3,t:'Routes and URLs',v:'flask2',nv:1,nvm:'The video link for this lesson has not been added yet. Work through the notes on the Read tab for now.',
+{id:'3-3',w:3,t:'Routes and URLs',v:'Jl9XzSPXSe4',
 s:'Routes can capture parts of the URL: <code>/lesson/&lt;int:lesson_id&gt;</code> passes an integer to your function. <code>methods=[...]</code> controls which HTTP methods a route accepts, <code>url_for</code> builds URLs from function names so links never break, and <code>redirect</code> and <code>abort</code> send the user elsewhere or return an error.',
 d:'<p>Prefer <code>url_for("lesson", lesson_id=3)</code> to hard-coding <code>"/lesson/3"</code>: if you change the URL later, every link updates. Converters also validate for free: <code>&lt;int:id&gt;</code> returns a 404 for <code>/lesson/abc</code>.</p><p>Two routes cannot share a function name, because <code>url_for</code> uses the function name to identify the route.</p>',
 tm:[['Dynamic route','A route with a variable part, such as /user/<name>.'],['URL converter','A prefix like int: that validates and converts a captured value.'],['url_for','Builds a URL from a view function’s name.'],['Redirect','A response telling the browser to go to a different URL.']],
 c:'from flask import Flask, redirect, url_for, abort\n\napp = Flask(__name__)\nLESSONS = {1: "Setup", 2: "Functions"}\n\n@app.route("/lesson/<int:lesson_id>")\ndef lesson(lesson_id):\n    if lesson_id not in LESSONS:\n        abort(404)\n    return f"Lesson {lesson_id}: {LESSONS[lesson_id]}"\n\n@app.route("/start")\ndef start():\n    return redirect(url_for("lesson", lesson_id=1))',
 tk:[['Add <code>/hello/&lt;name&gt;</code> that returns a greeting using the name from the URL.','The converter name must match the function parameter.','@app.route("/hello/<name>")\ndef hello(name):\n    return f"Hello, {name}!"'],['Make <code>/double/&lt;int:n&gt;</code> return twice the number, then visit <code>/double/abc</code> and see what happens.','Return a string; a view cannot return a raw int.','@app.route("/double/<int:n>")\ndef double(n):\n    return str(n * 2)\n# /double/abc gives a 404']],
 q:[['What does <code>&lt;int:id&gt;</code> in a route do?',['Captures part of the URL as an integer','Defines a database column','Sets the HTTP method'],0],['Why prefer <code>url_for</code> to hard-coded paths?',['Links update automatically if the route changes','It is faster','It encrypts URLs'],0],['Which function stops the request with a 404 error?',['abort(404)','redirect(404)','return 404()'],0]]},
-{id:'3-4',w:3,t:'Templates and Jinja',v:'flask3',nv:1,nvm:'The video link for this lesson has not been added yet. Work through the notes on the Read tab for now.',
+{id:'3-4',w:3,t:'Templates and Jinja',v:'w6Ui_DVxluc',
 s:'Templates are HTML files with placeholders. <code>render_template("page.html", name=value)</code> loads a file from the <code>templates/</code> folder and fills it using <b>Jinja</b>: <code>{{ value }}</code> prints a value, and <code>{% ... %}</code> runs logic such as loops and conditions.',
 d:'<p>Jinja escapes HTML automatically, which protects you from cross-site scripting. Only use <code>|safe</code> when you are certain the content is trusted.</p><p>Keep logic in Python and presentation in templates: if a template gets complicated, compute the value in the view instead. The folder must be named exactly <code>templates</code> and sit next to your app file.</p>',
 tm:[['Template','An HTML file with placeholders that Flask fills in.'],['Jinja','The templating language Flask uses.'],['Context variable','A value you pass from the view to the template.'],['Autoescaping','Jinja turning special characters into safe text so injected HTML cannot run.']],
