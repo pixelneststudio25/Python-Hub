@@ -521,6 +521,1443 @@ Q: Which single command leaves a virtual environment and returns the prompt to n
 TYPE: deactivate
 WHY: `deactivate` is defined by the activation script, which is why it only exists while an environment is active. It restores PATH and the prompt for that terminal session.
 </script>
+<script type="text/markdown" id="n-1-2">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to write a function from scratch and explain every part of its first line, call it with positional and keyword arguments, decide between printing and returning, return more than one value, predict which variable a name refers to inside and outside a function, and read the three function errors beginners meet most: a wrong number of arguments, a missing return value, and the scope error `UnboundLocalError`.
+
+## Part 1: Why functions exist
+A **function** is a named, reusable block of code that takes some inputs, does a job, and can hand back a result. You already use them: `print()`, `len()` and `sum()` are functions someone else wrote. Writing your own gives you three things.
+- **No repetition.** If you need to convert a motor speed from RPM to radians per second in ten places, you write the formula once. When you find a bug, you fix it once.
+- **A name for an idea.** `clamp(speed, 0, 100)` is easier to read than three lines of `if` statements.
+- **Testability.** A small function with clear inputs and outputs can be checked on its own, which is how professionals catch bugs early.
+
+In Flask, every page of your website will be a function, so this lesson is not optional background.
+
+## Part 2: Anatomy of a function definition
+```python
+def area(width, height):
+    return width * height
+
+result = area(3, 4)
+print(result)
+```
+Output: `12`. Read the first line piece by piece:
+- `def` is the keyword that says "I am defining a function".
+- `area` is the function's name. Use `snake_case` (lowercase words joined by underscores) and a verb or noun that says what it does.
+- `(width, height)` lists the **parameters**: names for the inputs the function expects.
+- The colon `:` ends the header and says "the body follows".
+- The **indented** lines are the body. Indentation is how Python knows which lines belong to the function. Use four spaces, and keep it consistent.
+- `return` sends a value back to whoever called the function and ends the function immediately.
+
+Defining a function does not run it. Nothing happens until you **call** it with parentheses: `area(3, 4)`. The values `3` and `4` are the **arguments**. Parameters are the names in the definition, arguments are the values you pass in. Python matches them up and runs the body.
+
+## Part 3: Calling a function, and how it can go wrong
+There are two ways to pass arguments, and they give the same result when used correctly:
+```python
+area(3, 4)                    # positional: matched by order
+area(height=4, width=3)       # keyword: matched by name, any order
+```
+Use positional for obvious inputs. Use keywords when the meaning of a value is not obvious from its position, for example `move(speed=5, safe=True)` is clearer than `move(5, True)`.
+
+If the count is wrong, Python stops and tells you exactly why:
+```python
+area(3)
+# TypeError: area() missing 1 required positional argument: 'height'
+
+area(3, 4, 5)
+# TypeError: area() takes 2 positional arguments but 3 were given
+```
+Read tracebacks from the bottom. The last line names the function and the problem, which here points directly at the call you got wrong.
+
+## Part 4: return, print, and None
+Beginners often mix up two different actions:
+```python
+def show_area(w, h):
+    print(w * h)          # displays text, then the function ends
+
+def get_area(w, h):
+    return w * h          # hands the number back to the caller
+
+a = show_area(3, 4)       # prints 12, but a is None
+b = get_area(3, 4)        # prints nothing, b is 12
+```
+`print` is for humans to read. `return` is for other code to use. If you only print, the value is gone: you cannot add it to something or store it. A function with no `return` statement returns `None`, Python's value meaning "nothing here". When a result you expected turns out to be `None`, a missing `return` is the first suspect.
+
+Two useful details:
+- **Several values:** `return low, high` actually returns one **tuple** `(low, high)`, which you can unpack: `low, high = bounds(data)`.
+- **Early return:** `return` ends the function on the spot, so you can handle special cases first.
+```python
+def safe_divide(a, b):
+    if b == 0:
+        return None       # leave early: nothing sensible to return
+    return a / b
+```
+
+## Part 5: Scope, or where a name is visible
+**Scope** is the region of code where a name exists. Variables created inside a function are **local**: they exist only while the function runs.
+```python
+x = 10                    # global: visible everywhere in this file
+
+def show():
+    x = 5                 # a NEW local x, unrelated to the global
+    print(x)
+
+show()                    # 5
+print(x)                  # 10: the global was never touched
+```
+When Python meets a name, it searches in this order, called **LEGB**: Local (inside the current function), Enclosing (any function wrapped around it), Global (the file), Built-in (names like `len`). It stops at the first match.
+
+That rule produces a famous trap. Assigning to a name anywhere in a function makes it local for the whole function:
+```python
+count = 0
+
+def bump():
+    count += 1            # UnboundLocalError
+
+bump()
+```
+The error reads: `UnboundLocalError: cannot access local variable 'count' where it is not associated with a value`. Python saw an assignment to `count`, decided it was local, and then found no value for it yet. There are three routes out, with different outcomes:
+- **Pass it in and return it (best):** `def bump(count): return count + 1`. The function depends only on its inputs, so it is easy to test and reason about.
+- **Use the `global` keyword:** `global count` inside the function makes it use the global one. It works, but any function can now change shared state, which makes bugs hard to track.
+- **Wrap the state in an object:** this is what classes are for, and you met them in Week 2.
+
+Shadowing is a related trap. If you write `len = 3` inside a function, a later `len([1, 2])` in that function fails with `TypeError: 'int' object is not callable`, because your local name hides the built-in.
+
+## Part 6: Docstrings and naming
+A **docstring** is a string placed first in the body. It documents the function and is shown by `help(area)`:
+```python
+def area(width, height):
+    """Return the area of a rectangle."""
+    return width * height
+```
+Good functions do one job and have a name that says which. If you cannot name it without the word "and", split it into two functions.
+
+## Part 7: How this connects to Flask
+A Flask page is a function: the function runs when someone visits a URL, and its **return value is the response** the browser receives. A URL like `/user/<name>` becomes a parameter on your function. And because Flask views must `return`, the print-versus-return distinction you just learned decides whether your page shows anything at all.
+
+## Recap
+- `def name(parameters):` defines a function, and calling it with arguments runs it.
+- Parameters are names in the definition; arguments are the values you pass.
+- `return` hands a value back and ends the function; no `return` means `None`.
+- Names assigned inside a function are local, and Python searches Local, Enclosing, Global, Built-in.
+- Prefer passing values in and returning results over changing globals.
+===TASKS===
+### Write and call your first functions | guided
+Create `functions_lab.py`. Write `area(width, height)` returning the area of a rectangle, then print `area(3, 4)` and `area(height=2, width=5)`. Finally, call `area(3)` on purpose and read the error.
+HINT: The keyword call should give the same result as swapping the order of positional arguments.
+EXPECT: `12`, then `10`, then a `TypeError` mentioning the missing argument `'height'`.
+SOL:
+```python
+def area(width, height):
+    return width * height
+
+print(area(3, 4))
+print(area(height=2, width=5))
+print(area(3))  # TypeError: area() missing 1 required positional argument: 'height'
+```
+### Print versus return | guided
+Write `show_double(n)` that prints `n * 2` and `get_double(n)` that returns it. Assign each call to a variable and print the variables. Before you run it, write down what you expect to see.
+HINT: One of the two variables will hold `None`.
+EXPECT: `show_double(4)` prints `8` and its variable prints `None`; `get_double(4)` prints nothing itself and its variable prints `8`.
+SOL:
+```python
+def show_double(n):
+    print(n * 2)
+
+def get_double(n):
+    return n * 2
+
+a = show_double(4)   # prints 8
+b = get_double(4)
+print(a)             # None
+print(b)             # 8
+```
+### Three useful functions | independent
+Write `is_even(n)`, `clamp(value, lo, hi)` (limit a motor speed to a safe range) and `celsius_to_fahrenheit(c)`. Then verify them with the `assert` lines below. If an assert fails, Python raises `AssertionError`.
+HINT: `max` and `min` combine neatly for clamp. Fahrenheit is `c * 9 / 5 + 32`.
+EXPECT: The script runs without printing anything or raising an error.
+SOL:
+```python
+def is_even(n):
+    return n % 2 == 0
+
+def clamp(value, lo, hi):
+    return max(lo, min(value, hi))
+
+def celsius_to_fahrenheit(c):
+    return c * 9 / 5 + 32
+
+assert is_even(4) and not is_even(7)
+assert clamp(150, 0, 100) == 100
+assert clamp(-5, 0, 100) == 0
+assert clamp(42, 0, 100) == 42
+assert celsius_to_fahrenheit(100) == 212
+```
+### Find the three bugs | debugging
+Each snippet below is broken. Name the cause of each one and fix it. (a) `def total(a, b): a + b` then `print(total(1, 2))` prints `None`. (b) A global `score = 0` with a function `def add_point(): score += 1`. (c) `def greet(name): return "Hi " + name` called as `greet("Ada", "Lovelace")`.
+HINT: (a) is about a missing keyword. (b) is about the scope rule for assignments. (c) is about counting arguments.
+SOL:
+(a) There is no `return`, so the function returns `None`. Fix: `return a + b`.
+(b) Assigning to `score` makes it local, so reading it fails with `UnboundLocalError`. Best fix: `def add_point(score): return score + 1` and call `score = add_point(score)`.
+(c) Two arguments were given to a one-parameter function, causing `TypeError`. Fix: pass one argument, or add a second parameter such as `greet(first, last)`.
+### Summarise a list | challenge
+Write `stats(numbers)` that returns three values: the smallest, the largest and the average. For an empty list return `None` instead. Do not use `statistics`. Check it with asserts.
+HINT: Return a tuple and unpack it at the call. Check for an empty list first and return early.
+EXPECT: `lo, hi, mean = stats([2, 4, 9])` gives `2`, `9` and `5.0`; `stats([])` is `None`.
+SOL:
+```python
+def stats(numbers):
+    if not numbers:
+        return None
+    return min(numbers), max(numbers), sum(numbers) / len(numbers)
+
+lo, hi, mean = stats([2, 4, 9])
+assert (lo, hi, mean) == (2, 9, 5.0)
+assert stats([]) is None
+```
+===QUIZ===
+Q: What does this program print?
+```python
+def f(x):
+    x = x + 1
+    print(x)
+
+y = f(1)
+print(y)
+```
+- `2` then `2`
+- `2` then `None` *
+- `None` then `2`
+- It raises a `NameError`
+WHY: The call runs `print(x)` and shows `2`. The function has no `return`, so it hands back `None`, and `y` becomes `None`.
+Q: What does this program print?
+```python
+n = 5
+
+def g():
+    n = 10
+    return n
+
+g()
+print(n)
+```
+- `10`
+- `5` *
+- `None`
+- An `UnboundLocalError`
+WHY: The assignment inside `g` creates a new local `n`. The global `n` is never changed, so it still prints `5`.
+Q: Which keyword sends a value back from a function to its caller?
+TYPE: return
+WHY: `return` hands the value back and ends the function. Without it, the function gives back `None`.
+Q: Why does `count += 1` inside a function fail with `UnboundLocalError` when `count` is defined globally?
+- Python forbids reading globals inside functions
+- The assignment makes `count` local for the whole function, and the local has no value yet *
+- `+=` only works on lists
+- Globals are deleted when a function starts
+WHY: Reading a global is fine. But any assignment to a name inside a function makes that name local throughout, so the read on the right of `+=` finds an empty local.
+Q: What does this print?
+```python
+def f(a, b=2):
+    return a * b
+
+print(f(b=3, a=2))
+```
+- `4`
+- `5`
+- `6` *
+- A `TypeError`
+WHY: Keyword arguments are matched by name, so `a` is 2 and `b` is 3. The order of keywords does not matter.
+Q: Calling a function with too few positional arguments raises which error type?
+TYPE: TypeError
+WHY: The message reads like `missing 1 required positional argument`. It is a `TypeError`, not a `NameError`, because the function exists; the call is wrong.
+Q: Which statement about `print` and `return` is correct?
+- `print` stores a value so the program can use it later
+- `return` displays text on the screen
+- A returned value can be stored and reused, while printed text is only shown *
+- They are interchangeable inside functions
+WHY: `print` is output for humans. `return` gives a value to the calling code, which can store it, test it or pass it on.
+Q: What type of object does this return, and what does `print(type(r))` show?
+```python
+def mm(a, b):
+    return min(a, b), max(a, b)
+
+r = mm(3, 1)
+print(type(r))
+```
+- `<class 'list'>`
+- `<class 'tuple'>` *
+- `<class 'dict'>`
+- Two separate values, so `r` is undefined
+WHY: A comma-separated `return` packs the values into one tuple. You unpack it with `low, high = mm(3, 1)`.
+Q: Inside a function you write `len = 3`, then later in that same function call `len([1, 2])`. What happens?
+- It returns `2`, because the built-in is used
+- `TypeError: 'int' object is not callable` *
+- `NameError`, because `len` is undefined
+- Python ignores the assignment
+WHY: The local name `len` is found first under the LEGB rule and hides the built-in. It holds the integer 3, which cannot be called like a function.
+Q: Which built-in function displays a function's docstring in the terminal?
+TYPE: help | help()
+WHY: `help(area)` prints the signature and docstring. It is how you read documentation without leaving Python.
+</script>
+<script type="text/markdown" id="n-1-3">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to give parameters default values and explain when those defaults are evaluated, collect any number of extra arguments with `*args` and `**kwargs`, unpack lists and dictionaries into a call with `*` and `**`, force arguments to be passed by name, and avoid the mutable default argument bug, one of the most famous traps in Python.
+
+## Part 1: Default arguments
+A **default argument** gives a parameter a value to use when the caller leaves it out.
+```python
+def log(message, level="INFO"):
+    print(f"[{level}] {message}")
+
+log("Motor started")            # [INFO] Motor started
+log("Battery low", "WARN")      # [WARN] Battery low
+log("Stall", level="ERROR")     # [ERROR] Stall
+```
+The syntax is `parameter=value` in the definition. The purpose is to make the common case short while keeping the unusual case possible. One rule applies: parameters with defaults must come **after** parameters without them. Reversing them is rejected before your program even starts:
+```python
+def log(level="INFO", message):   # SyntaxError: parameter without a default follows parameter with a default
+```
+The reason is simple. When you call `log("hello")`, Python fills parameters from left to right, so a required parameter after an optional one would be ambiguous.
+
+## Part 2: The mutable default trap
+Here is the surprising part. A default value is created **once**, when the `def` line runs, not each time the function is called. For numbers and strings that does not matter, because they cannot change. For a list or dictionary it matters a great deal:
+```python
+def add_reading(value, readings=[]):
+    readings.append(value)
+    return readings
+
+print(add_reading(10))   # [10]
+print(add_reading(20))   # [10, 20]   <-- the same list was reused
+```
+You expected `[20]`. Both calls shared one list that was created when the function was defined. There are two routes, with different outcomes:
+- **The `None` sentinel (recommended):** use `None` as the default, which is immutable and safe, and create the list inside the function.
+```python
+def add_reading(value, readings=None):
+    if readings is None:
+        readings = []
+    readings.append(value)
+    return readings
+```
+- **Copying the argument:** `readings = list(readings)` at the top avoids changing the caller's list, but it does not fix the shared default by itself. It only helps once you have already chosen a safe default.
+
+Remember the rule: never use a list, dictionary or set as a default value. Use `None`.
+
+## Part 3: `*args`, accepting any number of positional arguments
+Sometimes you do not know how many inputs you will get. `*args` collects all the extra positional arguments into one **tuple**:
+```python
+def total(*args):
+    print(args)
+    return sum(args)
+
+total(4, 8, 15)     # prints (4, 8, 15) and returns 27
+total()             # prints () and returns 0
+```
+The star in the **definition** means "pack". The name `args` is only a convention, and `*numbers` works identically, but sticking to `args` makes code recognisable. With no extra arguments you simply get an empty tuple, so the function never crashes for lack of input.
+
+The star also works in the opposite direction, in a **call**, where it means "unpack":
+```python
+readings = [4, 8, 15]
+total(*readings)    # same as total(4, 8, 15)
+```
+Without the star, `total(readings)` would pass one argument, the list itself, and `sum` would fail trying to add a list to `0`.
+
+## Part 4: `**kwargs`, accepting any number of keyword arguments
+`**kwargs` collects extra **keyword** arguments into a **dictionary**:
+```python
+def describe(name, **kwargs):
+    print(name, kwargs)
+
+describe("Rover", speed=5, mode="safe")
+# Rover {'speed': 5, 'mode': 'safe'}
+```
+Two stars in a call unpack a dictionary into keyword arguments:
+```python
+settings = {"speed": 5, "mode": "safe"}
+describe("Rover", **settings)    # identical to the call above
+```
+You will see this constantly. Libraries use `**kwargs` so they can accept options without listing every one in advance.
+
+## Part 5: Keyword-only arguments and parameter order
+A bare `*` in the parameter list forces everything after it to be passed by name:
+```python
+def move(speed, *, safe=True):
+    return (speed, safe)
+
+move(5, safe=False)    # fine
+move(5, False)         # TypeError: move() takes 1 positional argument but 2 were given
+```
+The purpose is safety: `move(5, False)` hides what `False` means, so the function demands you write it out. When you combine every kind of parameter, the order is fixed:
+```python
+def f(a, b=1, *args, c=2, **kwargs):
+    return a, b, args, c, kwargs
+
+f(1, 2, 3, 4, c=5, d=6)
+# (1, 2, (3, 4), 5, {'d': 6})
+```
+Trace it: `1` goes to `a`, `2` to `b`, the extra positionals `3, 4` into `args`, `c=5` matches the keyword-only `c`, and the leftover `d=6` lands in `kwargs`. The order is: required, defaults, `*args`, keyword-only, `**kwargs`.
+
+## Part 6: Forwarding arguments
+A very common pattern is a function that accepts anything and passes it along unchanged:
+```python
+def wrapper(*args, **kwargs):
+    print("calling")
+    return real_function(*args, **kwargs)
+```
+The wrapper does not need to know what the real function expects. This exact pattern is how decorators work, which is the topic two lessons from now.
+
+## Part 7: How this connects to Flask
+Flask uses all of this. `Flask(__name__, static_folder="assets")` mixes positional and keyword arguments. And `render_template("page.html", title="Hub", items=items)` accepts any number of keyword arguments, because its signature collects them with `**context`. Every key you pass becomes a variable available inside your HTML template.
+
+## Recap
+- A default is evaluated once, when the function is defined.
+- Never use a mutable object as a default; use `None` and create the object inside.
+- `*args` packs extra positionals into a tuple, and `**kwargs` packs extra keywords into a dict.
+- In a call, `*` and `**` unpack a sequence or a dictionary.
+- A bare `*` makes later parameters keyword-only. The order is required, defaults, `*args`, keyword-only, `**kwargs`.
+===TASKS===
+### Defaults in action | guided
+Write `log(message, level="INFO")` as shown in the notes. Call it three ways: with only a message, with a positional level, and with a keyword level. Then write a version with the parameters in the wrong order and read the `SyntaxError`.
+HINT: The `SyntaxError` appears as soon as you run the file, before any line executes.
+EXPECT: Three lines starting with `[INFO]`, `[WARN]` and `[ERROR]`, and then a `SyntaxError` mentioning a parameter without a default.
+SOL:
+```python
+def log(message, level="INFO"):
+    print(f"[{level}] {message}")
+
+log("Motor started")
+log("Battery low", "WARN")
+log("Stall", level="ERROR")
+```
+### Pack and unpack | guided
+Write `average(*numbers)` that returns the mean. Call it with three loose values and then with a list using `*`. Print what happens if you forget the star on the list.
+HINT: Without the star, the single argument is a list, so the function receives a tuple containing one list.
+EXPECT: Both correct calls give the same average, and the call without the star raises a `TypeError`.
+SOL:
+```python
+def average(*numbers):
+    return sum(numbers) / len(numbers)
+
+print(average(2, 4, 9))        # 5.0
+data = [2, 4, 9]
+print(average(*data))          # 5.0
+# average(data) -> TypeError: unsupported operand type(s) for +: 'int' and 'list'
+```
+### Robot factory | independent
+Write `make_robot(name, **options)` that returns a dictionary with the defaults `speed=1` and `mode="safe"`, overridden by anything passed in options. Then write `connect(host, *, port=80, secure=False)` and check that `connect("a", 8080)` raises a `TypeError`.
+HINT: Build the dictionary of defaults first, then merge the options in with `update`.
+EXPECT: `make_robot("R", speed=5)` gives `{'name': 'R', 'speed': 5, 'mode': 'safe'}`.
+SOL:
+```python
+def make_robot(name, **options):
+    robot = {"name": name, "speed": 1, "mode": "safe"}
+    robot.update(options)
+    return robot
+
+def connect(host, *, port=80, secure=False):
+    return host, port, secure
+
+assert make_robot("R", speed=5) == {"name": "R", "speed": 5, "mode": "safe"}
+```
+### Fix the three bugs | debugging
+(a) `def add_item(item, items=[])` returns a list that keeps growing across calls. (b) `def f(a=1, b):` will not run. (c) You call `total([1, 2, 3])` where `total(*args)` returns `sum(args)`. Explain each cause and fix it.
+HINT: (a) is about when defaults are evaluated, (b) about ordering, (c) about unpacking.
+SOL:
+(a) The default list is created once and shared. Fix: use `items=None` and create `items = []` inside when it is `None`.
+(b) A parameter without a default follows one with a default. Fix: `def f(b, a=1)`.
+(c) The list is passed as a single argument, so `args` is `([1, 2, 3],)`. Fix: `total(*[1, 2, 3])`.
+### Build a URL | challenge
+Write `build_url(base, *parts, **params)`. It should join the base and the parts with `/`, then add a query string from the keyword arguments. Example: `build_url("https://x.com", "users", 7, page=2, sort="asc")` gives `https://x.com/users/7?page=2&sort=asc`. With no parts and no params it returns the base unchanged.
+HINT: Convert each part with `str`, strip stray slashes, and only add `?` if `params` is not empty.
+EXPECT: The asserts below all pass.
+SOL:
+```python
+def build_url(base, *parts, **params):
+    url = "/".join([base.rstrip("/"), *[str(p).strip("/") for p in parts]])
+    if params:
+        url += "?" + "&".join(f"{k}={v}" for k, v in params.items())
+    return url
+
+assert build_url("https://x.com", "users", 7, page=2, sort="asc") == "https://x.com/users/7?page=2&sort=asc"
+assert build_url("https://x.com") == "https://x.com"
+```
+===QUIZ===
+Q: What does this print?
+```python
+def add(x, items=[]):
+    items.append(x)
+    return items
+
+print(add(1))
+print(add(2))
+```
+- `[1]` then `[2]`
+- `[1]` then `[1, 2]` *
+- `[1, 2]` then `[1, 2]`
+- A `TypeError` on the second call
+WHY: The default list is created once when `def` runs, so both calls append to the same object. The first call returns that list, which holds only `1` at that moment.
+Q: What type of object is `args` inside `def f(*args):`?
+TYPE: tuple
+WHY: `*args` packs the extra positional arguments into a tuple, which is why you cannot change it in place the way you can a list.
+Q: What does this print?
+```python
+def f(*args, **kwargs):
+    return len(args), len(kwargs)
+
+print(f(1, 2, a=3))
+```
+- `(3, 0)`
+- `(2, 1)` *
+- `(1, 2)`
+- `(2, 0)`
+WHY: The two loose values go into `args` and the single keyword argument goes into `kwargs`, so the lengths are 2 and 1.
+Q: Which definition is rejected with a `SyntaxError`?
+- `def f(a, b=1, *args)`
+- `def f(a=1, b)` *
+- `def f(*args, k=1)`
+- `def f(a, *, b)`
+WHY: A required parameter cannot follow a parameter with a default. The other three are valid, and `def f(a, *, b)` simply makes `b` a required keyword-only parameter.
+Q: What happens when this runs?
+```python
+def move(speed, *, safe=True):
+    return (speed, safe)
+
+print(move(5, False))
+```
+- It prints `(5, False)`
+- It prints `(5, True)`
+- A `TypeError`, because `safe` must be passed by name *
+- A `SyntaxError`
+WHY: Everything after the bare `*` is keyword-only. The call has two positional arguments for a function that accepts one, which raises a `TypeError` at call time.
+Q: What is the conventional name for the parameter that collects extra keyword arguments into a dictionary? Include the stars or not, either is accepted.
+TYPE: kwargs | **kwargs
+WHY: The name is only a convention, but the two stars are what create the dictionary.
+Q: What does this print?
+```python
+def show(a, b, c):
+    return a + b + c
+
+nums = [1, 2, 3]
+print(show(*nums))
+```
+- `6` *
+- A `TypeError` because a list was passed as one argument
+- `123`
+- `[1, 2, 3]`
+WHY: The star in the call unpacks the list into three separate arguments, so it is equivalent to `show(1, 2, 3)`.
+Q: Which statement explains the mutable default argument bug?
+- Python copies a default value every time the function is called
+- Lists are not allowed as defaults, so the code fails immediately
+- A default value is created once, when `def` runs, and shared by every call *
+- Defaults are evaluated lazily when first read
+WHY: The expression after `=` runs once at definition time. A mutable object stored there is then reused, so changes persist between calls.
+Q: What does this return?
+```python
+def f(a, b=1, *args, c=2, **kw):
+    return a, b, args, c, kw
+
+print(f(1, 2, 3, 4, c=5, d=6))
+```
+- `(1, 2, (3, 4), 2, {'c': 5, 'd': 6})`
+- `(1, 2, (3, 4), 5, {'d': 6})` *
+- `(1, 2, (), 5, {'d': 6})`
+- `(1, 2, (3, 4, 5), 2, {'d': 6})`
+WHY: `1` and `2` fill `a` and `b`, the extra positionals `3, 4` go into `args`, `c=5` binds the keyword-only `c`, and only the leftover `d=6` reaches `kw`.
+Q: What value should you use as the default for a parameter that should start as an empty list?
+TYPE: None
+WHY: `None` is immutable, so sharing it is harmless. Inside the function you replace it with a fresh list when needed.
+</script>
+<script type="text/markdown" id="n-1-4">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to treat functions as ordinary values (store them, pass them and return them), write short `lambda` functions and know when not to, define a function inside another function, build a closure that remembers its surroundings, explain what a closure actually captures, use `nonlocal` correctly, and avoid the late-binding trap that catches almost everyone.
+
+## Part 1: Functions are values
+In Python a function is an object, just like a number or a list. A name refers to it, and you can give it more names, put it in containers, or hand it to another function.
+```python
+def double(n):
+    return n * 2
+
+f = double           # no parentheses: f now refers to the same function
+print(f(5))          # 10
+print(double)        # <function double at 0x000001A2B3C4D5E0>
+```
+The difference between `double` and `double(5)` is the key idea of this lesson. **`double`** is the function itself. **`double(5)`** is a call that runs it and produces a result. Writing `print(double)` is a common mistake: it shows the function object, not an answer. Because functions are values, you can store them in a dictionary and choose one at runtime:
+```python
+operations = {"double": double, "square": lambda n: n * n}
+print(operations["square"](4))     # 16
+```
+This replaces long `if/elif` chains, and Flask uses a similar idea to map URLs to functions.
+
+## Part 2: Passing functions to other functions
+A function that takes another function as an argument is called a **higher-order function**. You already know one: `sorted` accepts a `key` function that decides how to compare items.
+```python
+words = ["pear", "fig", "apple"]
+print(sorted(words, key=len))      # ['fig', 'pear', 'apple']
+```
+Notice `key=len` has no parentheses. You are giving `sorted` the function so that it can call `len` on each word itself. If you wrote `len()` you would be calling it immediately, with no argument, and get an error.
+
+## Part 3: `lambda`, the one-line function
+When the function is tiny and used once, a **lambda** is a compact way to write it:
+```python
+square = lambda n: n * n
+```
+Read it as: `lambda` (keyword), `n` (parameters), `:` (separator), `n * n` (the expression whose value is returned automatically). A lambda has no name and its body must be a **single expression**. It cannot contain statements such as `return`, assignment or loops.
+```python
+points = [("a", 3), ("b", 1), ("c", 2)]
+print(sorted(points, key=lambda p: p[1]))   # [('b', 1), ('c', 2), ('a', 3)]
+```
+Use a lambda for short throwaway functions like this. If you need a name, a docstring, several lines, or you will reuse it, write a normal `def`. Lambdas are never required, just convenient.
+
+## Part 4: Functions inside functions
+Python lets you define a function inside another one:
+```python
+def outer():
+    message = "hello"
+    def inner():
+        print(message)     # inner can read outer's variable
+    inner()
+```
+`inner` can read `message` because of the **Enclosing** step in the LEGB lookup from the last lesson. The inner function exists only while `outer` runs, unless you return it.
+
+## Part 5: Closures
+Now the important step: return the inner function instead of calling it.
+```python
+def make_multiplier(n):
+    def times(x):
+        return x * n
+    return times
+
+double = make_multiplier(2)
+triple = make_multiplier(3)
+print(double(5))     # 10
+print(triple(5))     # 15
+```
+`make_multiplier` has finished by the time `double(5)` runs, so you would expect `n` to be gone. It is not. `times` **remembers** the variable `n` from the function that created it. A function bundled together with the variables it remembers is a **closure**. The two closures `double` and `triple` each carry their own separate `n`. You can even inspect it:
+```python
+print(double.__closure__[0].cell_contents)    # 2
+```
+The purpose of closures is configuration without classes: `make_multiplier(2)` builds a function that is "pre-set" to multiply by 2. Think of it as a controller you tune once with a gain value and then call repeatedly.
+
+## Part 6: What a closure captures, and the late-binding trap
+A closure captures the **variable**, not a snapshot of its value at that moment. If the variable changes later, the closure sees the new value. This produces a famous surprise:
+```python
+funcs = [lambda x: x * i for i in range(3)]
+print([f(10) for f in funcs])     # [20, 20, 20]  not [0, 10, 20]
+```
+All three lambdas share one variable `i`. By the time you call them, the loop has finished and `i` is `2`. There are two routes to fix it:
+- **Bind the value with a default argument (common):** `lambda x, i=i: x * i`. Defaults are evaluated at definition time, so each lambda gets its own copy: `[0, 10, 20]`.
+- **Use a factory function:** write `make_multiplier(i)` and call it in the loop. Each call has its own `n`, which is the same idea as the example in Part 5.
+
+## Part 7: `nonlocal`, changing the remembered variable
+Reading an enclosing variable works automatically. Changing it does not:
+```python
+def make_counter():
+    count = 0
+    def increment():
+        count += 1          # UnboundLocalError
+        return count
+    return increment
+```
+This is the same scope rule from Lesson 1-2: assigning to a name makes it local to `increment`. The keyword `nonlocal` says "this name belongs to the nearest enclosing function".
+```python
+def make_counter():
+    count = 0
+    def increment():
+        nonlocal count
+        count += 1
+        return count
+    return increment
+
+c = make_counter()
+print(c(), c(), c())      # 1 2 3
+```
+Each counter keeps its own `count`, so `make_counter()` called twice gives two independent counters. The alternatives to `nonlocal` are a mutable container such as `count = [0]` (works, but looks hacky) or a class with an attribute, which is often the clearest choice once state grows beyond one or two values.
+
+## Part 8: Why this matters for Flask
+Closures and functions-as-values are the machinery behind decorators, which come next. When you write `@app.route("/")`, Flask receives your function as a value and stores it in a table that maps URLs to functions. A decorator is simply a function that takes a function and returns a closure.
+
+## Recap
+- A function is a value. `f` is the function, `f()` calls it.
+- A higher-order function takes or returns functions, for example `sorted(items, key=len)`.
+- A lambda is a one-expression anonymous function.
+- A closure is an inner function that remembers variables from its enclosing function.
+- Closures capture variables, not values, which causes the late-binding trap.
+- Use `nonlocal` to reassign a remembered variable.
+===TASKS===
+### A dictionary of functions | guided
+Write functions `add(a, b)` and `multiply(a, b)`. Put them in a dictionary called `ops`, then write a loop that calls each one with `(6, 3)` and prints the name and result. Finally print `ops["add"]` without parentheses and notice what appears.
+HINT: Iterate with `for name, func in ops.items()` and call `func(6, 3)`.
+EXPECT: `add 9`, `multiply 18`, then a line like `<function add at 0x...>`.
+SOL:
+```python
+def add(a, b):
+    return a + b
+
+def multiply(a, b):
+    return a * b
+
+ops = {"add": add, "multiply": multiply}
+for name, func in ops.items():
+    print(name, func(6, 3))
+print(ops["add"])
+```
+### Sorting with keys | guided
+Given `readings = [("temp", 21.5), ("pressure", 101.3), ("humidity", 40.0)]`, sort the list by the second element using a lambda, then by the length of the first element using `key=` with `len` applied through a lambda.
+HINT: The lambda receives one tuple, so use `p[1]` and `len(p[0])`.
+EXPECT: First `[('temp', 21.5), ('humidity', 40.0), ('pressure', 101.3)]` (sorted by value), then `[('temp', 21.5), ('pressure', 101.3), ('humidity', 40.0)]` (sorted by name length; equal lengths keep their original order).
+SOL:
+```python
+readings = [("temp", 21.5), ("pressure", 101.3), ("humidity", 40.0)]
+print(sorted(readings, key=lambda p: p[1]))
+print(sorted(readings, key=lambda p: len(p[0])))
+```
+### Counters and multipliers | independent
+Write `make_multiplier(n)` and `make_counter()` (using `nonlocal`). Verify with asserts that two counters are independent and that two multipliers do not interfere.
+HINT: Call `make_counter()` twice and check that increasing one does not change the other.
+EXPECT: All asserts pass silently.
+SOL:
+```python
+def make_multiplier(n):
+    return lambda x: x * n
+
+def make_counter():
+    count = 0
+    def increment():
+        nonlocal count
+        count += 1
+        return count
+    return increment
+
+double, triple = make_multiplier(2), make_multiplier(3)
+assert double(5) == 10 and triple(5) == 15
+a, b = make_counter(), make_counter()
+assert a() == 1 and a() == 2 and b() == 1
+```
+### Fix the three bugs | debugging
+(a) `apply(double(), 5)` raises a `TypeError` where `apply(func, value)` returns `func(value)`. (b) `funcs = [lambda x: x + i for i in range(3)]` gives results that are all the same. (c) A counter without `nonlocal` raises `UnboundLocalError`. Explain each cause and fix it.
+HINT: (a) is about parentheses, (b) about when `i` is read, (c) about the scope rule for assignment.
+SOL:
+(a) `double()` calls the function with no argument. Pass the function itself: `apply(double, 5)`.
+(b) All lambdas share the variable `i`, which ends at 2. Bind it: `lambda x, i=i: x + i`.
+(c) Assignment makes the name local. Add `nonlocal count` before `count += 1`.
+### Build a monitor | challenge
+Write `make_monitor(limit)` that returns two functions sharing state: `check(reading)` returns `True` if the reading exceeds the limit (and counts it), and `count()` returns how many readings have exceeded the limit so far.
+HINT: Both inner functions need to see the same variable, and only `check` changes it.
+EXPECT: The asserts below pass.
+SOL:
+```python
+def make_monitor(limit):
+    exceeded = 0
+    def check(reading):
+        nonlocal exceeded
+        if reading > limit:
+            exceeded += 1
+            return True
+        return False
+    def count():
+        return exceeded
+    return check, count
+
+check, count = make_monitor(50)
+assert check(60) is True
+assert check(40) is False
+assert check(70) is True
+assert count() == 2
+```
+===QUIZ===
+Q: Given `def greet(): return "hi"`, what does `print(greet)` show?
+- `hi`
+- `<function greet at 0x...>` *
+- `None`
+- A `TypeError`
+WHY: Without parentheses you refer to the function object and do not call it, so Python prints a description of the object.
+Q: Which keyword lets an inner function reassign a variable that belongs to its enclosing function?
+TYPE: nonlocal
+WHY: `nonlocal` binds the name to the nearest enclosing function. `global` would refer to the file-level variable instead.
+Q: What does this print?
+```python
+funcs = [lambda x: x * i for i in range(3)]
+print([f(10) for f in funcs])
+```
+- `[0, 10, 20]`
+- `[20, 20, 20]` *
+- `[10, 10, 10]`
+- A `NameError`
+WHY: All three lambdas read the same variable `i`. By the time they are called the loop is over and `i` is 2, so each returns `10 * 2`.
+Q: What happens when `f()` is called?
+```python
+def make():
+    n = 0
+    def inc():
+        n += 1
+        return n
+    return inc
+
+f = make()
+f()
+```
+- It returns `1`
+- It returns `0`
+- An `UnboundLocalError` *
+- A `NameError` for `make`
+WHY: Assigning to `n` inside `inc` makes `n` local to `inc`, and the read in `n += 1` finds no value. You need `nonlocal n`.
+Q: What does a closure capture?
+- A frozen copy of each variable's value when the inner function is defined
+- The variables themselves, so later changes in the enclosing scope are visible *
+- Only constants
+- Nothing, because the enclosing function has finished
+WHY: Closures hold references to the variables, which is why the late-binding trap exists. A default argument is how you take a snapshot instead.
+Q: Which keyword creates an anonymous one-expression function?
+TYPE: lambda
+WHY: `lambda x: x * 2` defines a function with no name whose body is a single expression.
+Q: What does this print?
+```python
+print(sorted(["pear", "fig", "apple"], key=len))
+```
+- `['apple', 'fig', 'pear']`
+- `['fig', 'pear', 'apple']` *
+- `['pear', 'fig', 'apple']`
+- A `TypeError`
+WHY: `key=len` sorts by word length: 3, 4, 5. It does not sort alphabetically, and passing `len` without parentheses is what makes sorted call it on each item.
+Q: What does this print?
+```python
+def make_adder(n):
+    return lambda x: x + n
+
+add5 = make_adder(5)
+add10 = make_adder(10)
+print(add5(1), add10(1))
+```
+- `6 6`
+- `11 11`
+- `6 11` *
+- `6 10`
+WHY: Each call to `make_adder` creates its own `n`, so every closure carries a separate value.
+Q: Which statement about `lambda` is correct?
+- A lambda body can contain several statements separated by semicolons
+- A lambda body must be a single expression and cannot contain `return` or assignment statements *
+- A lambda can only have one parameter
+- Lambdas run faster than `def` functions
+WHY: The body of a lambda is exactly one expression whose value is returned. There is no speed advantage, and it can take any number of parameters.
+Q: Which attribute of a function object holds the variables it captured from an enclosing scope?
+TYPE: __closure__
+WHY: `f.__closure__` is a tuple of cells, one per captured variable, and `cell_contents` shows the stored value.
+</script>
+<script type="text/markdown" id="n-1-5">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain what a decorator is in one sentence, write one from scratch, apply it with the `@` syntax and say exactly what that syntax does behind the scenes, keep the original function's name with `functools.wraps`, write decorators that take arguments, and predict the order when several decorators are stacked.
+
+## Part 1: The idea
+A **decorator** is a function that takes a function and returns a new function, usually one that does the original job plus something extra. Last lesson you learned both ingredients: functions can be passed around as values, and an inner function can remember variables from its enclosing function. A decorator combines them.
+
+Why bother? Because some behaviour belongs to many functions: timing, logging, checking that a user is logged in, retrying on failure. Without decorators you would copy that code into every function. With one, you write it once and attach it with a single line.
+
+## Part 2: Building a decorator by hand
+Start with a plain function we want to time:
+```python
+import time
+
+def slow():
+    time.sleep(0.2)
+    return "done"
+```
+Now write a function that takes another function and returns a timed version:
+```python
+def timer(func):
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        print(f"{func.__name__} took {elapsed:.4f}s")
+        return result
+    return wrapper
+```
+Read it layer by layer:
+- `timer(func)` receives the original function as a value.
+- `wrapper` is the new function. It is a closure, so it remembers `func`.
+- `*args, **kwargs` means the wrapper accepts any arguments at all and passes them on unchanged, so the decorator works on any function.
+- `time.perf_counter()` is a high-resolution clock suited to measuring durations.
+- `result = func(...)` runs the original and **saves its result**.
+- `return result` hands that result back. Forgetting this line is the number one decorator bug: the original function would appear to return `None`.
+- `return wrapper` hands back the new function itself, without calling it. There are no parentheses after `wrapper`.
+
+Use it by hand:
+```python
+slow = timer(slow)
+print(slow())      # slow took 0.2003s   then   done
+```
+We replaced the name `slow` with the wrapped version. Anyone calling `slow()` now gets the timed behaviour.
+
+## Part 3: The `@` syntax
+Python provides a shortcut for that reassignment:
+```python
+@timer
+def slow():
+    time.sleep(0.2)
+    return "done"
+```
+This is exactly equivalent to writing `def slow(): ...` and then `slow = timer(slow)`. Nothing more. The `@` line is **syntactic sugar**, which is a convenience with no new behaviour. Two timing facts matter and are asked about in the quiz:
+- The decorator function (`timer`) runs **once**, at the moment the `def` line is executed.
+- The wrapper runs **every time** you call the decorated function.
+
+## Part 4: `functools.wraps`, keeping the identity
+There is a side effect. After decoration, `slow` is really `wrapper`:
+```python
+print(slow.__name__)     # wrapper
+```
+Debuggers, error messages and documentation tools all see `wrapper` instead of `slow`, and the docstring is lost. The standard library fixes this with a decorator for decorators:
+```python
+import functools
+
+def timer(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        ...
+    return wrapper
+```
+`functools.wraps(func)` copies the original's name, docstring and other metadata onto `wrapper`. Make it a habit in every decorator you write. This matters for Flask in particular: Flask identifies each route by its function name, and two decorated functions both named `wrapper` would collide.
+
+## Part 5: Decorators that take arguments
+What if you want `@repeat(3)`? Now there are **three** layers, because `repeat(3)` must itself return a decorator:
+```python
+import functools
+
+def repeat(times):                # layer 1: receives the argument
+    def decorator(func):          # layer 2: receives the function
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):   # layer 3: runs on each call
+            for _ in range(times):
+                result = func(*args, **kwargs)
+            return result
+        return wrapper
+    return decorator
+
+@repeat(3)
+def hello():
+    print("hello")
+
+hello()    # prints hello three times
+```
+Trace what `@repeat(3)` does. Python first evaluates `repeat(3)`, which returns `decorator`. Then it applies that to the function: `hello = repeat(3)(hello)`. Forgetting the parentheses, as in `@repeat`, passes the function in as `times`, which is a classic bug.
+
+## Part 6: Stacking decorators
+You can attach several. They apply from the **bottom up**, the one closest to the function first:
+```python
+def bold(f):
+    def w(*a, **k):
+        return "<b>" + f(*a, **k) + "</b>"
+    return w
+
+def italic(f):
+    def w(*a, **k):
+        return "<i>" + f(*a, **k) + "</i>"
+    return w
+
+@bold
+@italic
+def hi():
+    return "hi"
+
+print(hi())     # <b><i>hi</i></b>
+```
+It is equivalent to `hi = bold(italic(hi))`. `italic` wraps first, so it sits inside, and `bold` wraps the result on the outside.
+
+## Part 7: How this connects to Flask
+Here is the line you will write in every Flask app:
+```python
+@app.route("/")
+def home():
+    return "Hello"
+```
+`app.route("/")` is a decorator **with an argument**, exactly the three-layer pattern above. It registers your function in Flask's table of URLs, then hands your function back unchanged. Later you will meet `@login_required`, which wraps a view with a check before it runs. You now understand the machinery instead of memorising the syntax.
+
+## Recap
+- A decorator takes a function and returns a function, using closures.
+- `@deco` above a `def` means `f = deco(f)`, run once at definition time.
+- The wrapper takes `*args, **kwargs`, calls the original, and returns its result.
+- Use `functools.wraps` to preserve the name and docstring.
+- `@deco(arg)` is three layers: the outer function returns the decorator.
+- Stacked decorators apply bottom up.
+===TASKS===
+### Build and apply a timer | guided
+Write the `timer` decorator from Part 2, apply it with `@timer` to a function that sleeps for 0.1 seconds and returns `"done"`, call it, and confirm both the timing line and the return value appear.
+HINT: Remember `return result` inside the wrapper and `return wrapper` at the end.
+EXPECT: A line like `slow took 0.1004s`, then the value `done` when printed.
+SOL:
+```python
+import time
+
+def timer(func):
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        print(f"{func.__name__} took {time.perf_counter() - start:.4f}s")
+        return result
+    return wrapper
+
+@timer
+def slow():
+    time.sleep(0.1)
+    return "done"
+
+print(slow())
+```
+### See what `wraps` fixes | guided
+Print `slow.__name__` for your timer from the previous task. Then add `@functools.wraps(func)` to the wrapper and print it again. Also add a docstring to `slow` and print `slow.__doc__` both times.
+HINT: Import `functools` and place the decorator directly above `def wrapper`.
+EXPECT: First `wrapper` and `None`; after the fix, `slow` and your docstring text.
+SOL:
+```python
+import functools
+
+def timer(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    return wrapper
+```
+### A logging decorator | independent
+Write `@logged` that prints the function name and its arguments before every call and returns the original result. Test it on `add(a, b)` and confirm that `add(2, 3)` still returns `5` and that `add.__name__` is still `"add"`.
+HINT: Use `*args, **kwargs` in the wrapper and print them with an f-string.
+EXPECT: A printed line like `add (2, 3) {}` and both asserts pass.
+SOL:
+```python
+import functools
+
+def logged(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        print(func.__name__, args, kwargs)
+        return func(*args, **kwargs)
+    return wrapper
+
+@logged
+def add(a, b):
+    return a + b
+
+assert add(2, 3) == 5
+assert add.__name__ == "add"
+```
+### Fix the three bugs | debugging
+(a) A decorator's wrapper calls `func(*args, **kwargs)` but does not return it, so decorated functions return `None`. (b) A decorator ends with `return wrapper()` and later raises `TypeError: 'NoneType' object is not callable`. (c) You write `@repeat` instead of `@repeat(3)`. Explain each cause and the fix.
+HINT: (b) is about calling versus referring to a function, and (c) is about which layer receives which argument.
+SOL:
+(a) Add `return` before the call, or save it in `result` and return that.
+(b) `wrapper()` calls the wrapper and returns its result, `None`. The decorator must return the function itself: `return wrapper`.
+(c) Without parentheses the function becomes the `times` argument, so `repeat` returns a decorator instead of a wrapper. Write `@repeat(3)`.
+### Retry on failure | challenge
+Write `@retry(times)` that calls the function, and if it raises an exception tries again, up to `times` attempts in total. If the last attempt still fails, let the exception propagate. Test it with a function that fails twice and then succeeds.
+HINT: Use a `for attempt in range(1, times + 1)` loop with `try/except`, and `raise` inside the `except` on the final attempt.
+EXPECT: The asserts below pass.
+SOL:
+```python
+import functools
+
+def retry(times):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, times + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception:
+                    if attempt == times:
+                        raise
+        return wrapper
+    return decorator
+
+calls = {"n": 0}
+
+@retry(3)
+def flaky():
+    calls["n"] += 1
+    if calls["n"] < 3:
+        raise ValueError("fail")
+    return "ok"
+
+assert flaky() == "ok" and calls["n"] == 3
+```
+===QUIZ===
+Q: `@timer` placed above `def slow():` is exactly equivalent to which line placed after the function?
+- `timer = slow(timer)`
+- `slow = timer(slow)` *
+- `slow = timer()`
+- `slow()`
+WHY: The `@` syntax calls the decorator with the function and rebinds the function's name to whatever comes back.
+Q: What does this print?
+```python
+def deco(f):
+    def w(*a, **k):
+        f(*a, **k)
+    return w
+
+@deco
+def add(a, b):
+    return a + b
+
+print(add(1, 2))
+```
+- `3`
+- `None` *
+- `w`
+- A `TypeError`
+WHY: The wrapper calls `f` but never returns its value, so the decorated function returns `None`.
+Q: Which standard-library module provides the `wraps` helper for writing decorators?
+TYPE: functools
+WHY: `functools.wraps` copies the original function's name and docstring onto the wrapper.
+Q: What does `print(hi())` show for this code?
+```python
+@bold
+@italic
+def hi():
+    return "hi"
+```
+Assume `bold` wraps text in `<b>` tags and `italic` in `<i>` tags.
+- `<i><b>hi</b></i>`
+- `<b><i>hi</i></b>` *
+- `hi`
+- `<b>hi</b><i>hi</i>`
+WHY: Decorators apply from the bottom up, so `italic` wraps first, and `bold` wraps the result on the outside.
+Q: `@repeat(3)` above a function is equivalent to which statement?
+- `f = repeat(f)(3)`
+- `f = repeat(3)(f)` *
+- `f = repeat(3, f)`
+- `f = repeat(f, 3)`
+WHY: `repeat(3)` is evaluated first and returns the real decorator, which is then applied to the function.
+Q: Without `functools.wraps`, what is `slow.__name__` after `slow` is decorated by a typical wrapper-style decorator?
+TYPE: wrapper
+WHY: The name `slow` now refers to the inner function, whose own name is `wrapper`. This is the metadata `functools.wraps` copies back.
+Q: What is `hi` after this code runs?
+```python
+def deco(f):
+    return f()
+
+@deco
+def hi():
+    return "hi"
+```
+- The original function
+- The string `"hi"` *
+- `None`
+- Nothing, because Python raises an error at the definition
+WHY: This decorator calls the function and returns the result, so `hi` is rebound to the string `"hi"`. Calling `hi()` later would fail.
+Q: Which statement about when decorator code runs is correct?
+- The decorator function runs once when the `def` is executed, and the wrapper runs on every call *
+- Both the decorator and the wrapper run on every call
+- The decorator runs only when the function is first called
+- The wrapper runs once, at definition time
+WHY: Decoration happens at definition time, a single time. The wrapper it produced is what executes each time you call the function.
+Q: What does this print?
+```python
+def deco(f):
+    print("decorating")
+    def w(*a, **k):
+        print("calling")
+        return f(*a, **k)
+    return w
+
+@deco
+def hi():
+    pass
+
+hi()
+hi()
+```
+- `decorating` once, then `calling` twice *
+- `decorating` and `calling` twice each
+- `calling` twice only
+- `decorating` twice, then `calling` twice
+WHY: `decorating` prints during decoration, one time. `calling` is inside the wrapper, so it prints on each of the two calls.
+Q: Which Flask decorator registers a function for a URL? Give the form you write above the function.
+TYPE: app.route | @app.route | route
+WHY: `app.route("/path")` is a decorator with an argument. It records your function against that URL and returns it.
+</script>
+<script type="text/markdown" id="n-2-1">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain what a class and an object are and why they exist, write a class with an `__init__` method and several methods, say precisely what `self` is, create independent instances, read and change their attributes, explain the difference between two objects being equal and being the same object, and diagnose the three most common beginner errors with classes.
+
+## Part 1: Why classes exist
+Imagine tracking a robot with plain variables: `name = "Rover"`, `battery = 100`, `x = 0`. For one robot that is fine. For ten robots you now have thirty variables, and the functions that act on them (drive, charge) need all the right ones passed in. A dictionary helps: `robot = {"name": "Rover", "battery": 100}`. But then the data is in one place and the behaviour is somewhere else, and nothing stops you building a dictionary with a misspelt key.
+
+A **class** bundles the data and the behaviour that belongs together into one unit. The class is a **blueprint**. An **object** (also called an **instance**) is one real thing built from that blueprint. One `Robot` class, many `Robot` objects, each with its own battery level.
+
+## Part 2: Your first class
+```python
+class Robot:
+    def __init__(self, name, battery=100):
+        self.name = name
+        self.battery = battery
+
+    def status(self):
+        return f"{self.name}: {self.battery}% battery"
+
+r1 = Robot("Rover")
+r2 = Robot("Scout", 60)
+print(r1.status())     # Rover: 100% battery
+print(r2.status())     # Scout: 60% battery
+```
+Read it carefully:
+- `class Robot:` starts the blueprint. Class names use **PascalCase** (each word capitalised, no underscores). Functions and variables use snake_case, so you can tell them apart at a glance.
+- `def __init__(self, name, battery=100):` defines the **initializer**, a special method Python calls automatically right after it creates a new object. Its job is to set the object's starting data. The double underscores mark names that Python itself gives meaning to; they are called dunder (double-underscore) methods.
+- `self.name = name` creates an **attribute**, a variable stored on this particular object. The left side is the attribute, the right side is the parameter.
+- `Robot("Rover")` creates a new object and runs `__init__` with the arguments you gave. You never pass `self` yourself.
+
+## Part 3: What `self` really is
+`self` is the most confusing word in beginner Python, so let us make it concrete. When you write `r1.status()`, Python translates it into `Robot.status(r1)`. The object before the dot becomes the **first argument**, automatically. Inside the method, the parameter that receives it is conventionally named `self`.
+
+So `self` simply means "the particular object this method was called on". That is how one `status` method can report `Rover` for `r1` and `Scout` for `r2`: inside the method `self` refers to different objects each time. The name `self` is a convention, not a keyword, but every Python programmer uses it, so you should too.
+
+You can see the stored data directly:
+```python
+print(r1.__dict__)     # {'name': 'Rover', 'battery': 100}
+```
+Attributes are stored in a dictionary belonging to each object. That is why the two robots do not interfere with each other.
+
+## Part 4: Methods that change state
+A method can read attributes, and it can also change them:
+```python
+class Robot:
+    def __init__(self, name, battery=100):
+        self.name = name
+        self.battery = battery
+
+    def drive(self, km):
+        self.battery = max(0, self.battery - 2 * km)
+
+r = Robot("Rover")
+r.drive(10)
+print(r.battery)       # 80
+```
+`drive` returns nothing, because its purpose is a **side effect**: it changes the object. Compare with `status`, which returns a value. Deciding whether a method should change the object, return a value, or both is a design choice, and a good rule is to make each method clearly do one of them.
+
+## Part 5: Instances are independent, equality is not identity
+Two objects built from one class do not share attributes:
+```python
+a = Robot("A")
+b = Robot("A")
+a.drive(10)
+print(a.battery, b.battery)    # 80 100
+print(a == b)                  # False
+print(a is b)                  # False
+```
+Even though `a` and `b` have identical data, `==` is `False`. By default, `==` on your own objects compares **identity**, whether they are the very same object in memory, and `is` asks exactly that. Python does not guess what "equal" should mean for your class. In Lesson 2-3 you will define `__eq__` to teach it.
+
+Now the opposite situation, which surprises beginners:
+```python
+c = a          # not a copy: c is a second name for the same object
+c.drive(10)
+print(a.battery)    # 60
+```
+Assignment never copies an object. It attaches another name to it, so changes through `c` show up in `a`.
+
+## Part 6: Attributes, errors and printing
+Reading an attribute that does not exist raises `AttributeError: 'Robot' object has no attribute 'color'`. Python lets you add new attributes from outside (`r.color = "red"`), but that scatters the data definition around your program, so set every attribute inside `__init__`.
+
+Printing an object shows something unhelpful by default:
+```python
+print(r)     # <__main__.Robot object at 0x000001A2B3C4D5E0>
+```
+That is Python saying "an object of class Robot at this memory address". Lesson 2-3 shows how to control this with `__repr__`.
+
+## Part 7: The three errors you will meet
+- **Forgetting `self` in the definition.** `def status():` inside a class, then `r.status()`, raises `TypeError: Robot.status() takes 0 positional arguments but 1 was given`. Python passed the object in automatically and there was nowhere to put it.
+- **Forgetting `self.` in front of an attribute.** In `__init__`, writing `name = name` only changes a local variable, and later `r.name` raises `AttributeError`.
+- **Calling a method on the class instead of an object.** `Robot.status()` raises `TypeError: Robot.status() missing 1 required positional argument: 'self'`, because no object was supplied.
+
+## Part 8: How this connects to Flask
+`app = Flask(__name__)` creates an **instance** of the class `Flask`. Everything you do with `app`, such as `app.route(...)` and `app.run()`, is a method call on that object. The `request` object, database models and form classes you will meet in later weeks are all built on the ideas from this lesson.
+
+## Recap
+- A class is a blueprint, and an object (instance) is one thing built from it.
+- `__init__` runs automatically on creation and sets up the attributes.
+- `self` is the object a method was called on; `r.status()` means `Robot.status(r)`.
+- Instances have independent attributes, and assignment attaches a new name rather than copying.
+- `==` compares identity by default; you can define what equal means yourself later.
+===TASKS===
+### Build the Robot class | guided
+Write the `Robot` class from Part 2 with `__init__`, `status` and `drive(km)`. Create two robots, drive one 10 km, and print both statuses to confirm they are independent.
+HINT: `drive` should use `self.battery`, and should never let the battery fall below 0.
+EXPECT: One robot at `80% battery`, the other still at its starting level.
+SOL:
+```python
+class Robot:
+    def __init__(self, name, battery=100):
+        self.name = name
+        self.battery = battery
+
+    def status(self):
+        return f"{self.name}: {self.battery}% battery"
+
+    def drive(self, km):
+        self.battery = max(0, self.battery - 2 * km)
+
+a, b = Robot("A"), Robot("B")
+a.drive(10)
+print(a.status())   # A: 80% battery
+print(b.status())   # B: 100% battery
+```
+### Inspect your objects | guided
+Using your `Robot`, print `r.__dict__`, `type(r)`, `isinstance(r, Robot)`, `print(r)`, and the results of `a == b` and `a is b` for two robots with identical data. Write one sentence on what each line tells you.
+HINT: `isinstance(obj, Class)` answers whether the object was built from that class.
+EXPECT: A dictionary of attributes, `<class '__main__.Robot'>`, `True`, a memory-address description, and then `False` for both comparisons.
+SOL:
+Each attribute lives in the object's own dictionary. `type` shows the class, `isinstance` confirms it. The default `print` is not informative. The comparisons are `False` because `==` compares identity by default, and `a` and `b` are different objects.
+### A Battery class | independent
+Write a `Battery` class with a `capacity` and a current `level` that starts full. Add `drain(amount)` (never below 0), `charge(amount)` (never above capacity) and `percentage()` returning the level as a percent of capacity. Verify with asserts.
+HINT: Use `min` and `max` to keep the level within its limits.
+EXPECT: All asserts pass.
+SOL:
+```python
+class Battery:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.level = capacity
+
+    def drain(self, amount):
+        self.level = max(0, self.level - amount)
+
+    def charge(self, amount):
+        self.level = min(self.capacity, self.level + amount)
+
+    def percentage(self):
+        return self.level / self.capacity * 100
+
+b = Battery(200)
+b.drain(50)
+assert b.level == 150 and b.percentage() == 75
+b.charge(500)
+assert b.level == 200
+b.drain(999)
+assert b.level == 0
+```
+### Fix the three bugs | debugging
+(a) `class A: def f(): return 1` and `A().f()` raises a `TypeError`. (b) In `__init__(self, v)` the line `v = v * 2` is written and later `obj.v` raises `AttributeError`. (c) `Robot.status()` raises a `TypeError` about a missing argument. Explain each cause and fix it.
+HINT: (a) and (c) are about `self`, and (b) is about the difference between a local variable and an attribute.
+SOL:
+(a) Python passes the object as the first argument, so the method needs a parameter for it: `def f(self):`.
+(b) `v = v * 2` changes a local variable that disappears when `__init__` ends. Write `self.v = v * 2`.
+(c) `Robot.status` is called on the class with no object. Create an instance and call it on that: `Robot("R").status()`.
+### A Student class | challenge
+Write a `Student` class with a name and a list of grades created in `__init__` (not shared between students). Add `add_grade(g)` that raises `ValueError` if `g` is not between 0 and 100, `average()` that returns `None` for no grades, and `best()` returning the highest grade or `None`.
+HINT: Create `self.grades = []` inside `__init__` so each student gets their own list.
+EXPECT: The asserts pass and a second student starts with no grades.
+SOL:
+```python
+class Student:
+    def __init__(self, name):
+        self.name = name
+        self.grades = []
+
+    def add_grade(self, g):
+        if not 0 <= g <= 100:
+            raise ValueError("grade must be between 0 and 100")
+        self.grades.append(g)
+
+    def average(self):
+        return sum(self.grades) / len(self.grades) if self.grades else None
+
+    def best(self):
+        return max(self.grades) if self.grades else None
+
+a, b = Student("A"), Student("B")
+a.add_grade(80); a.add_grade(90)
+assert a.average() == 85 and a.best() == 90
+assert b.grades == [] and b.average() is None
+```
+===QUIZ===
+Q: What happens when this runs?
+```python
+class A:
+    def f():
+        return 1
+
+print(A().f())
+```
+- It prints `1`
+- A `TypeError` saying the method takes 0 positional arguments but 1 was given *
+- An `AttributeError`
+- A `NameError`
+WHY: Python passes the object automatically as the first argument, and `f` has no parameter to receive it.
+Q: What is the name of the special method that Python calls to set up a new instance?
+TYPE: __init__
+WHY: `__init__` is the initializer. It runs right after the object is created and is where you set its starting attributes.
+Q: What does this print?
+```python
+class P:
+    def __init__(self, x):
+        self.x = x
+
+a = P(1)
+b = P(1)
+print(a == b, a is b)
+```
+- `True True`
+- `True False`
+- `False False` *
+- `False True`
+WHY: By default `==` compares identity, just like `is`. Two separately created objects are different objects even when their data is identical.
+Q: Which statement about `self` is accurate?
+- It is a reserved keyword that cannot be renamed
+- It refers to the class itself
+- It is the object the method was called on, passed in automatically as the first argument *
+- It must be supplied explicitly when you call a method
+WHY: `r.status()` is translated to `Robot.status(r)`. The name `self` is only a convention.
+Q: What does this print?
+```python
+class C:
+    def __init__(self):
+        self.n = 0
+
+    def inc(self):
+        self.n += 1
+
+a = C()
+b = a
+b.inc()
+print(a.n)
+```
+- `0`
+- `1` *
+- `2`
+- An error
+WHY: `b = a` does not copy the object. Both names refer to the same instance, so incrementing through `b` changes what `a` sees.
+Q: Which exception is raised when you read an attribute that an object does not have?
+TYPE: AttributeError
+WHY: The message reads like `'Robot' object has no attribute 'color'`. A `NameError` is for undefined variables, not attributes.
+Q: What does `print(r)` show for a plain `Robot` object with no `__repr__` defined?
+- The robot's name
+- `Robot(name='Rover')`
+- Something like `<__main__.Robot object at 0x000001A2B3C4D5E0>` *
+- `None`
+WHY: The default display only names the class and the memory address. You will define `__repr__` to make it useful.
+Q: Which call is equivalent to `r.status()`?
+- `Robot.status()`
+- `Robot.status(r)` *
+- `status(r)`
+- `r.Robot.status()`
+WHY: The object before the dot becomes the first argument. This is what `self` receives.
+Q: What happens here?
+```python
+class T:
+    def __init__(self, v):
+        v = v * 2
+
+a = T(5)
+print(a.v)
+```
+- `10`
+- `5`
+- An `AttributeError` *
+- `None`
+WHY: `v = v * 2` only changes a local variable. No attribute was ever set on the object, so `a.v` does not exist. The fix is `self.v = v * 2`.
+Q: What naming convention do Python class names use?
+TYPE: PascalCase | CapWords | CamelCase
+WHY: Each word starts with a capital letter and there are no underscores, as in `Robot` or `BatteryPack`. Functions and variables use lowercase snake_case.
+</script>
 <script>
 const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
