@@ -1958,6 +1958,1258 @@ Q: What naming convention do Python class names use?
 TYPE: PascalCase | CapWords | CamelCase
 WHY: Each word starts with a capital letter and there are no underscores, as in `Robot` or `BatteryPack`. Functions and variables use lowercase snake_case.
 </script>
+<script type="text/markdown" id="n-2-2">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to tell instance attributes from class attributes and predict which one Python finds, avoid the shadowing and shared-list traps, write a `@classmethod` as an alternative constructor, write a `@staticmethod`, and choose among a normal method, a class method and a static method for any given job.
+
+## Part 1: Instance attributes versus class attributes
+In the last lesson every attribute was set through `self` inside `__init__`, so each object held its own copy. Those are **instance attributes**. A **class attribute** is defined in the class body, outside any method, and belongs to the class itself, so every instance can see the same one.
+```python
+class Robot:
+    count = 0                 # class attribute: shared by all robots
+    max_battery = 100         # class attribute: a constant for the design
+
+    def __init__(self, name):
+        self.name = name      # instance attribute: one per robot
+        Robot.count += 1
+
+r1 = Robot("Rover")
+r2 = Robot("Scout")
+print(Robot.count)    # 2
+print(r1.count)       # 2  (r1 has no count of its own, so Python finds the class's)
+```
+When Python evaluates `r1.count` it searches in a fixed order: first the **instance's own attributes**, then the **class's**, then parent classes. The first match wins. That lookup order explains everything in this lesson.
+
+Class attributes are the right home for data that belongs to the whole design: a count of how many objects exist, a limit shared by all robots, a default setting, a constant such as a tax rate.
+
+## Part 2: The shadowing trap
+Assigning through an instance never changes the class attribute. It creates a **new instance attribute with the same name** that hides the class one:
+```python
+r1.count = 5
+print(r1.count, r2.count, Robot.count)    # 5 2 2
+```
+`r1` now has its own `count`, found first in the lookup, while the class attribute is untouched. The same thing happens with `r1.count += 1`, because that reads the class value and then assigns a new instance attribute. To change the shared value, assign through the class: `Robot.count += 1`. Inside a method you can write `type(self).count += 1`, which also works when subclasses are involved.
+
+## Part 3: The shared mutable trap
+This is the class-level cousin of the mutable default argument bug:
+```python
+class Team:
+    members = []              # one list for the whole class
+
+    def add(self, name):
+        self.members.append(name)
+
+a, b = Team(), Team()
+a.add("Ada")
+print(b.members)              # ['Ada']  <-- b sees a's data
+```
+`append` modifies the shared list in place, and no assignment happens, so no shadowing occurs. The fix is to create the list per instance:
+```python
+class Team:
+    def __init__(self):
+        self.members = []     # one list per team
+```
+Rule: use class attributes for immutable constants and counters. Per-object data, especially lists and dictionaries, belongs in `__init__`.
+
+## Part 4: Class methods
+A normal method receives the instance as `self`. A **class method** receives the **class** as its first argument, by convention called `cls`. You mark it with the `@classmethod` decorator (you now know what a decorator is):
+```python
+class Robot:
+    def __init__(self, name, battery=100):
+        self.name = name
+        self.battery = battery
+
+    @classmethod
+    def from_string(cls, text):
+        name, battery = text.split("-")
+        return cls(name, int(battery))
+
+r = Robot.from_string("Rover-80")
+print(r.name, r.battery)      # Rover 80
+```
+The main use is an **alternative constructor**: another way to build an object, here from a string. A class can have only one `__init__`, so classmethods are how you offer several creation routes (`from_string`, `from_dict`, `from_file`).
+
+Notice `cls(name, int(battery))` rather than `Robot(name, int(battery))`. If a subclass `Drone` inherits `from_string`, then `Drone.from_string("D-50")` receives `cls = Drone` and builds a **Drone**. Hard-coding `Robot` would always build a `Robot`, which breaks inheritance.
+
+## Part 5: Static methods
+A **static method** receives neither the instance nor the class. It is an ordinary function that happens to live inside the class because it is related to it:
+```python
+class Robot:
+    @staticmethod
+    def is_valid_name(name):
+        return name.isalpha() and len(name) >= 2
+
+print(Robot.is_valid_name("R2"))      # False
+```
+There is no `self`, so a static method cannot read or change any object's data. If you try to use `self` inside one you get `NameError: name 'self' is not defined`. Both `Robot.is_valid_name("x")` and `r.is_valid_name("x")` work.
+
+## Part 6: Choosing between the three
+Ask what the method needs to know:
+- It needs **this object's** data: a normal method, with `self`.
+- It needs **the class** (to build instances, or to read or change class attributes): a `@classmethod`, with `cls`.
+- It needs **neither**: a `@staticmethod`, or simply a module-level function. If you cannot decide, a plain function is often cleaner. Static methods mostly serve organisation, keeping a helper next to the class it belongs to.
+
+## Part 7: How this connects to Flask
+Flask configuration is commonly written as a class of class attributes, such as `class Config: DEBUG = False`, then loaded with `app.config.from_object(Config)`. Later, when you build database models, you will call methods on the class itself (`User.query...`) and write your own `from_dict` constructors. Class methods and class attributes are everywhere in real Flask code.
+
+## Recap
+- Class attributes are shared; instance attributes belong to one object. Lookup checks the instance first, then the class.
+- Assigning through an instance creates a new instance attribute that shadows the class one.
+- Never store per-object lists or dictionaries as class attributes.
+- `@classmethod` receives `cls` and is the standard way to write alternative constructors.
+- `@staticmethod` receives nothing and is just a related function stored in the class.
+===TASKS===
+### Count your robots | guided
+Add a class attribute `count = 0` to `Robot` and increase it in `__init__` using `Robot.count += 1`. Create three robots and print `Robot.count`. Then run `r1.count = 99` and print `r1.count`, `r2.count` and `Robot.count`.
+HINT: Remember the lookup order: instance first, then class.
+EXPECT: `3`, then `99 3 3`.
+SOL:
+```python
+class Robot:
+    count = 0
+
+    def __init__(self, name):
+        self.name = name
+        Robot.count += 1
+
+r1, r2, r3 = Robot("A"), Robot("B"), Robot("C")
+print(Robot.count)                      # 3
+r1.count = 99
+print(r1.count, r2.count, Robot.count)  # 99 3 3
+```
+### An alternative constructor | guided
+Add a classmethod `from_string(cls, text)` to `Robot` that accepts `"Rover-80"` and builds a robot with that name and battery. Then create a subclass `Drone(Robot)` with nothing in it and confirm `Drone.from_string("D-50")` returns a `Drone`.
+HINT: Use `cls(...)` rather than `Robot(...)`, and check with `type(obj)`.
+EXPECT: `type(Drone.from_string("D-50"))` shows `<class '__main__.Drone'>`.
+SOL:
+```python
+class Robot:
+    def __init__(self, name, battery=100):
+        self.name = name
+        self.battery = battery
+
+    @classmethod
+    def from_string(cls, text):
+        name, battery = text.split("-")
+        return cls(name, int(battery))
+
+class Drone(Robot):
+    pass
+
+print(type(Drone.from_string("D-50")))
+```
+### A Temperature class | independent
+Write a `Temperature` class that stores degrees Celsius. Add a class constant `ABSOLUTE_ZERO = -273.15`, a static method `c_to_f(c)`, and a classmethod `from_fahrenheit(f)` that builds an object. `__init__` must raise `ValueError` below absolute zero.
+HINT: `from_fahrenheit` should convert, then call `cls(...)`.
+EXPECT: The asserts pass.
+SOL:
+```python
+class Temperature:
+    ABSOLUTE_ZERO = -273.15
+
+    def __init__(self, celsius):
+        if celsius < self.ABSOLUTE_ZERO:
+            raise ValueError("below absolute zero")
+        self.celsius = celsius
+
+    @staticmethod
+    def c_to_f(c):
+        return c * 9 / 5 + 32
+
+    @classmethod
+    def from_fahrenheit(cls, f):
+        return cls((f - 32) * 5 / 9)
+
+assert Temperature.c_to_f(100) == 212
+assert Temperature.from_fahrenheit(212).celsius == 100
+```
+### Fix the three bugs | debugging
+(a) A counter written as `self.count += 1` inside `__init__` always shows 1 for every object. (b) A class with `tags = []` shows tags added to one object on every other object. (c) A `@staticmethod` that uses `self.name` raises `NameError`. Explain each cause and the fix.
+HINT: (a) and (b) are about where the data lives, and (c) is about what a static method receives.
+SOL:
+(a) `self.count += 1` creates a new instance attribute each time. Use `Robot.count += 1`.
+(b) The list is a class attribute shared by all instances. Create `self.tags = []` in `__init__`.
+(c) Static methods get no `self`. Make it a normal method, or pass the value in as a parameter.
+### An employee class | challenge
+Write `Employee` with a class attribute `raise_amount = 1.04`, an instance method `apply_raise()` using it, a classmethod `set_raise(cls, amount)` that changes the class value, a classmethod `from_string("Ada-Lovelace-5000")`, and a static method `is_workday(day)` returning `False` for Saturday and Sunday (use a `datetime.date`).
+HINT: `date.weekday()` returns 0 for Monday through 6 for Sunday.
+EXPECT: The asserts pass.
+SOL:
+```python
+import datetime
+
+class Employee:
+    raise_amount = 1.04
+
+    def __init__(self, first, last, pay):
+        self.first, self.last, self.pay = first, last, pay
+
+    def apply_raise(self):
+        self.pay = int(self.pay * self.raise_amount)
+
+    @classmethod
+    def set_raise(cls, amount):
+        cls.raise_amount = amount
+
+    @classmethod
+    def from_string(cls, text):
+        first, last, pay = text.split("-")
+        return cls(first, last, int(pay))
+
+    @staticmethod
+    def is_workday(day):
+        return day.weekday() < 5
+
+e = Employee.from_string("Ada-Lovelace-5000")
+e.apply_raise()
+assert e.pay == 5200
+assert Employee.is_workday(datetime.date(2026, 10, 12)) is True
+assert Employee.is_workday(datetime.date(2026, 10, 11)) is False
+```
+===QUIZ===
+Q: What does this print?
+```python
+class Robot:
+    count = 2
+
+r1 = Robot()
+r2 = Robot()
+r1.count = 5
+print(r1.count, r2.count, Robot.count)
+```
+- `5 5 5`
+- `5 2 2` *
+- `5 2 5`
+- `2 2 2`
+WHY: The assignment through `r1` creates a new instance attribute that hides the class attribute. `r2` and the class are unaffected.
+Q: Which decorator makes a method receive the class instead of the instance?
+TYPE: classmethod | @classmethod
+WHY: `@classmethod` passes the class as the first argument, by convention named `cls`.
+Q: What does this print?
+```python
+class A:
+    items = []
+
+a, b = A(), A()
+a.items.append(1)
+print(b.items)
+```
+- `[]`
+- `[1]` *
+- `None`
+- An `AttributeError`
+WHY: `append` modifies the one shared list in place. There is no assignment, so no instance attribute is created and both objects see the same list.
+Q: What does this print?
+```python
+class R:
+    count = 0
+    def __init__(self):
+        R.count += 1
+
+x = R()
+y = R()
+print(R.count, x.count)
+```
+- `2 2` *
+- `2 0`
+- `1 1`
+- `0 0`
+WHY: The class attribute is updated through the class. `x` has no instance attribute named `count`, so the lookup finds the class value.
+Q: Why does an alternative constructor return `cls(...)` rather than the hard-coded class name?
+- It is faster
+- Subclasses calling it receive instances of themselves, not of the parent *
+- `cls` is a reserved word that must be used
+- It prevents the class from being edited
+WHY: When `Drone.from_string(...)` runs, `cls` is `Drone`. Hard-coding `Robot` would break that.
+Q: What is the conventional name of the first parameter of a class method?
+TYPE: cls
+WHY: `cls` stands for the class, in the same way `self` stands for the instance.
+Q: What does this print?
+```python
+class A:
+    @staticmethod
+    def f(x):
+        return x * 2
+
+print(A.f(3), A().f(4))
+```
+- `6 8` *
+- A `TypeError` on the second call
+- `6 6`
+- `None None`
+WHY: Static methods work when called on the class or on an instance, and neither is passed in automatically.
+Q: What happens if a `@staticmethod` body uses `self.name`?
+- It works and finds the name
+- `NameError: name 'self' is not defined` *
+- `AttributeError` on `self`
+- It silently returns `None`
+WHY: Static methods receive no first argument, so `self` was never created. If you need object data, make it a normal method.
+Q: What does this print?
+```python
+class A:
+    n = 1
+
+a = A()
+A.n = 2
+print(a.n)
+```
+- `1`
+- `2` *
+- `None`
+- An `AttributeError`
+WHY: `a` has no instance attribute `n`, so the lookup falls through to the class, where the value is now 2.
+Q: When Python evaluates `r.count`, which does it check first: the instance or the class?
+TYPE: instance
+WHY: The lookup order is the instance's own attributes, then the class, then parent classes. That is why an instance attribute can shadow a class attribute.
+</script>
+<script type="text/markdown" id="n-2-3">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to write a subclass that reuses and extends a parent, call the parent's code with `super()`, decide between inheritance and composition, define `__repr__`, `__str__`, `__eq__` and operator methods so your objects behave like built-in types, and use `@property` to add validation and computed values without changing how callers use your class.
+
+## Part 1: Inheritance
+**Inheritance** lets a new class start from an existing one. The new class, the **subclass** (or child), gets all the attributes and methods of the **parent** (or base class), and can add or change things.
+```python
+class Robot:
+    def __init__(self, name):
+        self.name = name
+        self.battery = 100
+
+    def describe(self):
+        return f"{self.name} (battery {self.battery}%)"
+
+class Drone(Robot):
+    def __init__(self, name):
+        super().__init__(name)
+        self.altitude = 0
+
+    def ascend(self, meters):
+        self.altitude += meters
+
+d = Drone("Sky")
+d.ascend(30)
+print(d.describe())      # Sky (battery 100%)   <- inherited
+print(d.altitude)        # 30
+```
+Read the new parts:
+- `class Drone(Robot):` the parent in parentheses means "a Drone **is a** Robot".
+- `super().__init__(name)` calls the parent's `__init__` so the robot part of the object gets set up. `super()` means "the parent class, seen from here".
+- If you skip that line, `name` and `battery` are never created, and `d.describe()` fails with `AttributeError: 'Drone' object has no attribute 'name'`.
+- Use `isinstance(d, Robot)` to ask whether an object belongs to a class **or any of its subclasses**; here it is `True`. `type(d) == Robot` is `False`, because `type` demands the exact class.
+
+## Part 2: Overriding and extending
+A subclass can **override** a method by defining one with the same name. Using `super()` you can keep the parent's behaviour and add to it:
+```python
+class Drone(Robot):
+    def describe(self):
+        return super().describe() + f", altitude {self.altitude}m"
+```
+Two routes exist, with different outcomes. If you do not call `super()`, the child's method completely **replaces** the parent's. If you do, the child **extends** it, which also means that later changes to the parent's version reach the child automatically. Prefer extending unless the behaviour genuinely differs.
+
+## Part 3: Inheritance or composition?
+Inheritance models **"is-a"**: a Drone is a Robot. **Composition** models **"has-a"**: a Robot *has a* Battery. For has-a relationships, store the other object as an attribute:
+```python
+class Robot:
+    def __init__(self, name, battery):
+        self.name = name
+        self.battery = battery      # a Battery object from Lesson 2-1
+```
+Choose inheritance only when the child can honestly stand in for the parent everywhere. Overusing it creates tangled hierarchies where a change in the parent breaks distant children. A good habit is to try composition first.
+
+## Part 4: Dunder methods
+Python calls certain specially named methods for you in certain situations. They begin and end with two underscores, so they are called **dunder** (double-underscore) or magic methods. You rarely call them yourself. You define them so that built-in operations work on your objects.
+
+### `__repr__` and `__str__`: how an object is displayed
+```python
+class Robot:
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return f"Robot({self.name!r})"
+
+    def __str__(self):
+        return f"Robot named {self.name}"
+
+r = Robot("Rover")
+print(r)          # Robot named Rover   (print uses __str__)
+print([r])        # [Robot('Rover')]    (containers use __repr__)
+```
+`__repr__` is for **developers**: unambiguous, ideally looking like the code that would recreate the object. `__str__` is for **users**: friendly. If you define only one, define `__repr__`, because `print` falls back to it when `__str__` is missing. The `!r` inside the f-string means "use the repr of this value", which adds the quotes around a string.
+
+### `__eq__`: what "equal" means
+```python
+    def __eq__(self, other):
+        return isinstance(other, Robot) and self.name == other.name
+```
+This replaces the default identity comparison from Lesson 2-1. A side effect to know: once you define `__eq__` without `__hash__`, Python sets `__hash__` to `None`, so your objects can no longer be dictionary keys or set members and you get `TypeError: unhashable type`. For objects you intend to compare by value, that is often acceptable, and you can add a `__hash__` later if needed.
+
+### Operators and built-ins
+```python
+class Vector2:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+    def __add__(self, other):
+        return Vector2(self.x + other.x, self.y + other.y)
+
+    def __len__(self):
+        return 2
+
+print(Vector2(1, 2) + Vector2(3, 4))      # uses __add__
+print(len(Vector2(1, 2)))                 # 2, uses __len__
+```
+`a + b` is translated to `a.__add__(b)`. Likewise `len(x)` calls `x.__len__()`, and `a == b` calls `a.__eq__(b)`. The purpose of all of these is one idea: your objects can look and behave like built-in types.
+
+## Part 5: Properties
+Suppose `battery` must stay between 0 and 100. With a plain attribute anyone can write `r.battery = 500`. A **property** lets you run code on read and write while callers still write plain `r.battery`:
+```python
+class Robot:
+    def __init__(self, name):
+        self.name = name
+        self._battery = 100
+
+    @property
+    def battery(self):                 # runs on: r.battery
+        return self._battery
+
+    @battery.setter
+    def battery(self, value):          # runs on: r.battery = value
+        if not 0 <= value <= 100:
+            raise ValueError("battery must be 0-100")
+        self._battery = value
+```
+The leading underscore in `_battery` is a convention meaning "internal, do not touch from outside". The property named `battery` is the public door. The big benefit: you can begin with a simple attribute and add rules later **without changing any code that uses it**, because the syntax for callers stays the same.
+
+A property with no setter is **read-only**, which suits computed values:
+```python
+    @property
+    def percent_label(self):
+        return f"{self._battery}%"
+```
+The most common mistake is writing `self.battery = value` inside the setter. That calls the setter again, which calls it again, and you get `RecursionError: maximum recursion depth exceeded`. Always store the data under a different name, such as `self._battery`.
+
+## Part 6: How this connects to Flask
+Flask code leans on this lesson constantly. Database models inherit from a base class (`class User(db.Model)`), forms inherit from `FlaskForm`, and almost every model defines a `__repr__` so debugging output is readable. Later you will use a property to store a password so that reading is blocked and writing automatically hashes it.
+
+## Recap
+- A subclass inherits from its parent, and `super()` calls the parent's code. Always call `super().__init__(...)` when you define your own `__init__`.
+- Overriding replaces; calling `super()` inside extends.
+- Use inheritance for "is-a" and composition for "has-a".
+- Dunder methods let objects work with `print`, `==`, `+` and `len`. Define `__repr__` first.
+- `@property` and `@name.setter` add validation behind plain attribute syntax. Never assign to the same name inside its own setter.
+===TASKS===
+### Build a Drone | guided
+Using the `Robot` from Part 1, write `Drone(Robot)` with an `altitude` attribute and an `ascend(meters)` method, and override `describe` to extend the parent's text with the altitude.
+HINT: Call `super().__init__(name)` first, and use `super().describe()` inside the override.
+EXPECT: `Sky (battery 100%), altitude 30m` after ascending 30.
+SOL:
+```python
+class Robot:
+    def __init__(self, name):
+        self.name = name
+        self.battery = 100
+
+    def describe(self):
+        return f"{self.name} (battery {self.battery}%)"
+
+class Drone(Robot):
+    def __init__(self, name):
+        super().__init__(name)
+        self.altitude = 0
+
+    def ascend(self, meters):
+        self.altitude += meters
+
+    def describe(self):
+        return super().describe() + f", altitude {self.altitude}m"
+
+d = Drone("Sky")
+d.ascend(30)
+print(d.describe())
+```
+### Repr and str | guided
+Add `__repr__` and `__str__` to `Robot`. Print a single robot, then print a list containing it, and write down which method each line used.
+HINT: Printing a single object uses `__str__`, while a list shows each item using `__repr__`.
+EXPECT: A friendly line first, then a list showing the repr form.
+SOL:
+```python
+class Robot:
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return f"Robot({self.name!r})"
+
+    def __str__(self):
+        return f"Robot named {self.name}"
+
+r = Robot("Rover")
+print(r)       # __str__
+print([r])     # __repr__
+```
+### A Vector class | independent
+Write `Vector2(x, y)` with `__add__`, `__eq__` and `__repr__`. Verify with asserts that `Vector2(1, 2) + Vector2(3, 4)` equals `Vector2(4, 6)`, that `repr` gives `"Vector2(4, 6)"`, and that comparing with a non-vector gives `False`.
+HINT: In `__eq__`, check `isinstance(other, Vector2)` before comparing the numbers.
+EXPECT: All asserts pass.
+SOL:
+```python
+class Vector2:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+    def __add__(self, other):
+        return Vector2(self.x + other.x, self.y + other.y)
+
+    def __eq__(self, other):
+        return isinstance(other, Vector2) and (self.x, self.y) == (other.x, other.y)
+
+    def __repr__(self):
+        return f"Vector2({self.x}, {self.y})"
+
+assert Vector2(1, 2) + Vector2(3, 4) == Vector2(4, 6)
+assert repr(Vector2(4, 6)) == "Vector2(4, 6)"
+assert (Vector2(1, 1) == 5) is False
+```
+### Fix the three bugs | debugging
+(a) A subclass defines `__init__` without calling `super().__init__()`, and a parent attribute is missing. (b) A property setter contains `self.battery = value` and raises `RecursionError`. (c) After you add `__eq__`, using the object as a dictionary key raises `TypeError: unhashable type`. Explain each cause and the fix.
+HINT: (b) is about a setter calling itself, and (c) is about what Python does to `__hash__` when `__eq__` is defined.
+SOL:
+(a) The parent's setup never ran. Add `super().__init__(...)` at the top of the child's `__init__`.
+(b) The assignment triggers the setter again forever. Store the value in `self._battery` instead.
+(c) Defining `__eq__` sets `__hash__` to `None`. Either do not use the object as a key, or define `__hash__`, for example `return hash((self.x, self.y))`.
+### A validated temperature | challenge
+Write `Temperature` with a `celsius` property whose setter rejects values below -273.15 with `ValueError`, and a read-only `fahrenheit` property computed from it. Show that assigning to `fahrenheit` raises `AttributeError`.
+HINT: A property without a setter is read-only. Initialise through the property so validation runs in `__init__` too.
+EXPECT: The asserts pass.
+SOL:
+```python
+class Temperature:
+    def __init__(self, celsius):
+        self.celsius = celsius          # goes through the setter
+
+    @property
+    def celsius(self):
+        return self._celsius
+
+    @celsius.setter
+    def celsius(self, value):
+        if value < -273.15:
+            raise ValueError("below absolute zero")
+        self._celsius = value
+
+    @property
+    def fahrenheit(self):
+        return self._celsius * 9 / 5 + 32
+
+t = Temperature(100)
+assert t.fahrenheit == 212
+try:
+    t.fahrenheit = 5
+except AttributeError:
+    pass
+else:
+    raise AssertionError("fahrenheit should be read-only")
+```
+===QUIZ===
+Q: What happens when this runs?
+```python
+class A:
+    def __init__(self):
+        self.x = 1
+
+class B(A):
+    def __init__(self):
+        self.y = 2
+
+print(B().x)
+```
+- `1`
+- `None`
+- An `AttributeError`, because the parent's `__init__` never ran *
+- A `TypeError`
+WHY: The child's `__init__` replaced the parent's, so `x` was never set. Calling `super().__init__()` fixes it.
+Q: Which built-in function gives access to the parent class's methods from inside a subclass?
+TYPE: super | super()
+WHY: `super()` means the parent class as seen from the current class. It is how `super().__init__(...)` and extended methods work.
+Q: What does `print(r)` show?
+```python
+class Robot:
+    def __repr__(self):
+        return "Robot('R')"
+
+r = Robot()
+print(r)
+```
+- `<__main__.Robot object at 0x...>`
+- `Robot('R')` *
+- `R`
+- A `TypeError`
+WHY: `print` looks for `__str__`, and when it is missing it falls back to `__repr__`.
+Q: Why does `self.battery = value` inside the `battery` setter cause a `RecursionError`?
+- Properties cannot be assigned inside a class
+- The assignment calls the setter again, which assigns again, forever *
+- `value` is out of range
+- The getter blocks the setter
+WHY: Assigning to a property runs its setter. Inside the setter, assign to a different name such as `self._battery`.
+Q: What does this print?
+```python
+class A:
+    def f(self):
+        return "A"
+
+class B(A):
+    def f(self):
+        return "B" + super().f()
+
+print(B().f())
+```
+- `B`
+- `A`
+- `BA` *
+- `AB`
+WHY: `B.f` runs and then calls the parent's `f` through `super()`, so the result is `"B"` followed by `"A"`.
+Q: Which decorator lets a method be read like an attribute, without parentheses?
+TYPE: property | @property
+WHY: A property keeps attribute syntax for callers while letting you run validation or computation behind it.
+Q: What happens to instances of a class that defines `__eq__` but not `__hash__`?
+- Nothing changes
+- They become unhashable, so they cannot be dictionary keys or set members *
+- They can no longer be compared
+- Python generates a hash from the attributes automatically
+WHY: Python sets `__hash__` to `None` in that case, to avoid a hash that disagrees with equality. Define `__hash__` yourself if you need hashing.
+Q: What does this print?
+```python
+class A: pass
+class B(A): pass
+
+b = B()
+print(isinstance(b, A), type(b) == A)
+```
+- `True True`
+- `True False` *
+- `False True`
+- `False False`
+WHY: `isinstance` accepts subclasses, while `type(b) == A` requires the exact class, which is `B`.
+Q: A `Car` needs an `Engine`. Which design is more appropriate?
+- `class Car(Engine)`, because a car is an engine
+- Composition: the car stores an `Engine` object as an attribute *
+- Copy the engine code into `Car`
+- A static method on `Engine`
+WHY: A car is not a kind of engine, it has one. Inheritance models "is-a", and composition models "has-a".
+Q: Which dunder method does `print(obj)` try first?
+TYPE: __str__
+WHY: `print` calls `__str__` for the friendly text and falls back to `__repr__` only when `__str__` is not defined.
+</script>
+<script type="text/markdown" id="n-2-4">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to read a traceback and say what went wrong and where, handle errors with `try`, `except`, `else` and `finally`, raise your own exceptions (including your own exception classes), choose between checking first and handling afterwards, split code across files with `import`, and explain the `if __name__ == "__main__"` line you have been seeing.
+
+## Part 1: What an exception is
+When Python cannot continue, it stops and raises an **exception**: an object describing the problem. If nothing handles it, the program ends and Python prints a **traceback**:
+```python
+def ratio(a, b):
+    return a / b
+
+print(ratio(1, 0))
+```
+```
+Traceback (most recent call last):
+  File "demo.py", line 4, in <module>
+    print(ratio(1, 0))
+  File "demo.py", line 2, in ratio
+    return a / b
+ZeroDivisionError: division by zero
+```
+Read it from the **bottom**. The last line has the exception type (`ZeroDivisionError`) and a message. The lines above are the chain of calls that led there, oldest first, each with a file, line number and the code. The last code line is where it happened (`return a / b`), and the one above it shows who called it. Most debugging is just reading this carefully.
+
+## Part 2: Handling exceptions
+```python
+def read_speed(text):
+    try:
+        speed = float(text)
+    except ValueError:
+        print("Not a number, using 0")
+        return 0.0
+    else:
+        return speed
+    finally:
+        print("done")
+```
+Each block has a role:
+- `try:` holds the code that might fail. Keep it small, so you know which line caused a problem.
+- `except ValueError:` runs **only if** a `ValueError` is raised in the try block. The program then continues normally.
+- `else:` runs only if the try block raised **nothing**.
+- `finally:` runs **always**, whether or not there was an error, even when the block returns. It is for cleanup, such as closing a connection.
+
+Prediction practice: `read_speed("5")` prints `done` and returns `5.0`. `read_speed("x")` prints the message, then `done`, and returns `0.0`.
+
+Useful variations:
+```python
+except (ValueError, TypeError):      # one handler for several types
+    ...
+except ValueError as e:              # keep the exception object
+    print(type(e).__name__, e)       # ValueError could not convert string to float: 'x'
+```
+**Be specific.** A bare `except:` (or `except Exception:` used lazily) catches every error, including your own typos, and even Ctrl+C in the bare case. The program then carries on in a broken state and the real bug is hidden. Catch only what you expect and know how to handle.
+
+## Part 3: Raising your own exceptions
+Use `raise` to signal that something is wrong:
+```python
+def drive(self, km):
+    if km < 0:
+        raise ValueError("distance cannot be negative")
+```
+For problems specific to your program, define your own exception class. It is just a class that inherits from `Exception`, which you now understand:
+```python
+class LowBattery(Exception):
+    pass
+
+def drive(self, km):
+    if self.battery < km * 2:
+        raise LowBattery(f"need {km * 2}%, have {self.battery}%")
+```
+Callers can now catch exactly this case with `except LowBattery:`. A bare `raise` inside an `except` block re-raises the current exception, which is useful when you want to log it and still let it propagate.
+
+## Part 4: The built-in exceptions you will meet
+- `ValueError`: right type, wrong value, like `int("abc")`.
+- `TypeError`: wrong type or wrong number of arguments, like `"a" + 1`.
+- `KeyError`: a dictionary key is missing, like `d["missing"]`.
+- `IndexError`: a list index is out of range.
+- `AttributeError`: the object has no such attribute.
+- `FileNotFoundError`: the path does not exist (more in the next lesson).
+- `ModuleNotFoundError`: `import` could not find the module.
+
+## Part 5: Look first, or handle afterwards?
+Two styles exist, with different outcomes:
+```python
+# LBYL: "look before you leap"
+if "speed" in config:
+    speed = config["speed"]
+else:
+    speed = 1
+
+# EAFP: "easier to ask forgiveness than permission"
+try:
+    speed = config["speed"]
+except KeyError:
+    speed = 1
+```
+Python favours EAFP when failure is rare and the check would be awkward. Checking first can also be wrong if something changes between the check and the action, such as a file deleted by another program. Use LBYL when the check is simple and the failure is common.
+
+## Part 6: Modules and imports
+Every `.py` file is a **module**. Another file can use its contents with `import`:
+```python
+# helpers.py
+def clamp(v, lo, hi):
+    return max(lo, min(v, hi))
+
+# main.py
+import helpers
+print(helpers.clamp(150, 0, 100))      # 100
+
+from helpers import clamp              # import one name directly
+import helpers as h                    # shorter alias
+```
+What happens at `import`: Python searches for the module (the current folder first, then installed packages), **runs the file once from top to bottom**, and stores the result so later imports reuse it. Because the file runs on import, any print statement or loop at the top of a module runs when imported.
+
+That is the purpose of this guard:
+```python
+if __name__ == "__main__":
+    main()
+```
+Python sets `__name__` to the string `"__main__"` only when the file is executed directly (`python main.py`). When the file is imported, `__name__` is the module name instead, so the guarded code is skipped. It lets one file be both a reusable module and a runnable script.
+
+A **package** is a folder of modules, usually containing an `__init__.py` file, imported as `from mypackage import tools`.
+
+Two traps to know: naming your file the same as a library (`random.py`, `json.py`) makes `import random` load **your** file instead, because the current folder is searched first. And two modules importing each other creates a circular import error, which you fix by moving shared code to a third module.
+
+## Part 7: How this connects to Flask
+Flask projects are packages of modules: routes in one file, models in another. `from flask import Flask` is exactly the import form above, and the `__name__` you pass to `Flask(__name__)` is the module-name variable from the guard. You will also register your own error pages with `@app.errorhandler(404)` and use `abort(404)` to raise HTTP errors, which are exceptions under the hood.
+
+## Recap
+- Read tracebacks from the bottom; the last line says what, the lines above say where.
+- `try` holds risky code, `except` handles named errors, `else` runs on success, `finally` always runs.
+- Catch specific exceptions; never use a bare `except`.
+- Define your own exceptions by inheriting from `Exception`.
+- `import` runs a module once; the `__main__` guard separates running from importing.
+===TASKS===
+### Catch a division error | guided
+Write `safe_ratio(a, b)` that returns `a / b`, or `None` if `b` is zero. Use `try/except ZeroDivisionError`. Call it with `(6, 3)` and `(1, 0)`.
+HINT: Put only the division inside `try`.
+EXPECT: `2.0` and `None`.
+SOL:
+```python
+def safe_ratio(a, b):
+    try:
+        return a / b
+    except ZeroDivisionError:
+        return None
+
+print(safe_ratio(6, 3))   # 2.0
+print(safe_ratio(1, 0))   # None
+```
+### Ask until valid | guided
+Write a loop that keeps asking `input("Speed: ")` until the user types a number, using `try/except ValueError`. Use `else` to leave the loop on success.
+HINT: `while True:` with a `break` in the `else` branch.
+EXPECT: Typing `abc` re-prompts; typing `5` finishes and prints `5.0`.
+SOL:
+```python
+while True:
+    text = input("Speed: ")
+    try:
+        speed = float(text)
+    except ValueError:
+        print("Please enter a number.")
+    else:
+        break
+print(speed)
+```
+### A custom exception | independent
+Create `LowBattery(Exception)` and a `Robot.drive(km)` that raises it when the battery cannot cover `2 * km` percent, otherwise reduces the battery. Show with `try/except` that driving 100 km on a fresh robot raises it and that the battery is unchanged afterwards.
+HINT: Check before changing the battery, so a failed call leaves the state untouched.
+EXPECT: The asserts pass.
+SOL:
+```python
+class LowBattery(Exception):
+    pass
+
+class Robot:
+    def __init__(self):
+        self.battery = 100
+
+    def drive(self, km):
+        if self.battery < km * 2:
+            raise LowBattery(f"need {km * 2}%, have {self.battery}%")
+        self.battery -= km * 2
+
+r = Robot()
+try:
+    r.drive(100)
+except LowBattery:
+    assert r.battery == 100
+else:
+    raise AssertionError("should have raised")
+```
+### Fix the three bugs | debugging
+(a) A `try` block wrapping twenty lines ends with a bare `except: pass`, and a typo in one line never shows. (b) You created `random.py` in your project and now `import random` behaves strangely. (c) A module has `print("loading")` and `run()` at the top level, and importing it starts the program. Explain each cause and the fix.
+HINT: (b) concerns the order Python searches for modules, and (c) concerns the `__main__` guard.
+SOL:
+(a) A bare except hides every error. Keep `try` small, catch the specific exception, and let others propagate.
+(b) The current folder is searched first, so your file shadows the standard library. Rename it.
+(c) Top-level code runs on import. Move the call into `if __name__ == "__main__": run()`.
+### Two-file project | challenge
+Create `geometry.py` with `area(w, h)` that raises `ValueError` for negative values, and `main.py` that imports it, asks the user for two numbers, catches `ValueError` for both bad text and negatives, and prints a friendly message. Guard the entry point.
+HINT: `float("x")` and your own `raise` both produce `ValueError`, so one `except` can cover both.
+EXPECT: Valid numbers print the area; text or negatives print a message and the program ends normally.
+SOL:
+```python
+# geometry.py
+def area(w, h):
+    if w < 0 or h < 0:
+        raise ValueError("sides must not be negative")
+    return w * h
+
+# main.py
+from geometry import area
+
+def main():
+    try:
+        w = float(input("Width: "))
+        h = float(input("Height: "))
+        print(area(w, h))
+    except ValueError as e:
+        print("Invalid input:", e)
+
+if __name__ == "__main__":
+    main()
+```
+===QUIZ===
+Q: What does this print?
+```python
+def f():
+    try:
+        return "try"
+    finally:
+        print("finally")
+
+print(f())
+```
+- `try`
+- `finally` then `try` *
+- `try` then `finally`
+- Only `finally`
+WHY: `finally` runs before the function actually returns, so its print happens first, then the returned value is printed.
+Q: Which exception is raised when you read a dictionary key that does not exist?
+TYPE: KeyError
+WHY: `d["missing"]` raises `KeyError`. Use `d.get("missing")` if you want `None` instead.
+Q: What does this print?
+```python
+try:
+    int("x")
+except ValueError:
+    print("a")
+else:
+    print("b")
+finally:
+    print("c")
+```
+- `a`, `b`, `c`
+- `a`, `c` *
+- `b`, `c`
+- `c` only
+WHY: `int("x")` raises `ValueError`, so the handler prints `a`. `else` is skipped because there was an error, and `finally` always runs.
+Q: Why is a bare `except:` considered bad practice?
+- It is slower than a named except
+- It catches everything, including bugs and Ctrl+C, hiding real problems *
+- It is a `SyntaxError` in Python 3
+- It only works for `ValueError`
+WHY: It cannot tell an expected failure from a mistake. Catch specific exceptions you know how to handle.
+Q: What does this print?
+```python
+try:
+    result = 10 / 0
+except ZeroDivisionError as e:
+    print(type(e).__name__)
+```
+- `division by zero`
+- `ZeroDivisionError` *
+- `ArithmeticError`
+- `e`
+WHY: `type(e).__name__` is the name of the exception class. `str(e)` would be the message `division by zero`.
+Q: Which keyword raises an exception on purpose?
+TYPE: raise
+WHY: `raise ValueError("message")` creates and throws the exception, and a bare `raise` inside `except` re-raises the current one.
+Q: You save a file called `random.py` in your project and then run `import random`. What most likely happens?
+- Python imports the standard library module as usual
+- Python imports your file instead, because the current folder is searched first *
+- Python raises a `SyntaxError`
+- Python merges both modules
+WHY: The search order puts the local folder before installed and built-in modules, so your file shadows the library.
+Q: A module `a.py` contains `print("loaded")`. `main.py` runs `import a` twice. How many times is `loaded` printed?
+- Zero
+- Once *
+- Twice
+- It depends on the Python version
+WHY: Python runs a module once on first import and stores it, so later imports reuse the stored module.
+Q: What does EAFP mean in Python style?
+- Always check every condition before acting
+- Try the operation and handle the failure if it happens *
+- Never use exceptions
+- Avoid functions with side effects
+WHY: It stands for "easier to ask forgiveness than permission". It contrasts with checking first (LBYL).
+Q: Which variable equals `"__main__"` when a file is run directly with `python file.py`?
+TYPE: __name__
+WHY: When the file is imported, `__name__` holds the module's name instead, which is why the guard works.
+</script>
+<script type="text/markdown" id="n-2-5">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to build file paths that work from any folder, read and write text files safely with `with open(...)`, explain what each file mode does to existing data, convert Python data to JSON and back, diagnose the typical file and JSON errors, and combine functions, classes, exceptions and files into a complete command-line quiz app, which is this week's assignment.
+
+## Part 1: Paths, and why "file not found" happens so often
+A **path** says where a file is. An **absolute path** starts from the root of the drive (`C:\Users\you\hub\questions.json`). A **relative path** (`questions.json`) is interpreted from the **current working directory**, the folder your terminal is in when you run the program, which is not necessarily the folder holding your script. That mismatch is the cause of most `FileNotFoundError` messages.
+
+The `pathlib` module makes paths safe and readable:
+```python
+from pathlib import Path
+
+BASE = Path(__file__).parent          # the folder that contains this script
+QUESTIONS = BASE / "questions.json"   # the / operator joins path parts
+
+print(QUESTIONS.exists())             # True or False
+```
+`__file__` is the location of the current script, `.parent` is its folder, and `/` joins pieces using the right separator for your system. On Windows, avoid writing `"C:\new\test.txt"` as a plain string, because `\n` and `\t` become newline and tab characters. Using `Path` and forward slashes sidesteps the problem.
+
+## Part 2: Reading and writing text files
+```python
+with open("notes.txt", "w", encoding="utf-8") as f:
+    f.write("first line\n")
+    f.write("second line\n")
+
+with open("notes.txt", encoding="utf-8") as f:
+    text = f.read()            # whole file as one string
+```
+Read the call piece by piece:
+- `open(path, mode, encoding=...)` returns a **file object**.
+- `with ... as f:` is a **context manager**. When the block ends, even if an error occurs, Python closes the file for you. Without it, a forgotten `close()` can lose data or lock the file.
+- `encoding="utf-8"` states how characters are stored as bytes. Always specify it, because a different default on another machine can corrupt non-English text.
+
+The **mode** decides what happens to existing content, and getting this wrong destroys data:
+- `"r"` read (the default). Raises `FileNotFoundError` if the file does not exist.
+- `"w"` write. **Creates the file or erases it** if it exists. Opening the wrong file with `"w"` wipes it instantly.
+- `"a"` append. Adds to the end and keeps what is there.
+- `"x"` create new. Raises `FileExistsError` if it already exists, which protects against accidental overwrite.
+
+Reading options: `f.read()` returns everything, `f.readline()` returns one line, and iterating `for line in f:` handles one line at a time without loading the whole file, which is best for large files.
+
+## Part 3: JSON
+**JSON** (JavaScript Object Notation) is a text format for structured data, and it is the language of web APIs. It looks like Python dictionaries and lists, with strict rules:
+```
+{"name": "Rover", "battery": 80, "online": true, "tags": ["a", "b"], "owner": null}
+```
+- Keys and strings need **double** quotes. Single quotes are invalid.
+- No trailing commas, no comments.
+- `true`, `false` and `null` are lowercase.
+
+Python maps to JSON like this: `dict` to object, `list` and `tuple` to array, `str` to string, `int` and `float` to number, `True`/`False` to `true`/`false`, and `None` to `null`.
+
+There are four functions, and the names tell you what they do. The `s` stands for **string**:
+```python
+import json
+
+text = json.dumps({"a": True, "b": None})    # Python -> JSON string:  '{"a": true, "b": null}'
+data = json.loads(text)                      # JSON string -> Python
+
+with open("data.json", "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)             # Python -> file (pretty-printed)
+
+with open("data.json", encoding="utf-8") as f:
+    data = json.load(f)                      # file -> Python
+```
+Two errors to recognise:
+- `json.JSONDecodeError`: the text is not valid JSON (single quotes, a trailing comma, a cut-off file).
+- `TypeError: Object of type set is not JSON serializable`: JSON has no set, date or custom-object type. Convert first (`list(my_set)`) or pass `default=str` to `dump`.
+
+## Part 4: A small persistence pattern
+Real programs wrap loading and saving in two functions that handle the awkward cases once:
+```python
+def load_json(path, default):
+    if not path.exists():
+        return default
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return default
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+```
+Notice the design decision: a missing or corrupt file returns a sensible default instead of crashing, because for a high-score file that is the friendlier behaviour. For a file that must exist, you would let the exception propagate instead. Choosing which is a judgement about the situation.
+
+## Part 5: This week's assignment, a command-line quiz app
+You now have every tool for this project. The requirements:
+- `questions.json` holds a list of questions, each with `question`, `options` (a list) and `answer` (the index of the correct option).
+- The program loads them, asks each in turn, accepts a number from the user, and re-asks if the input is invalid.
+- It prints the final score, and saves the best score in `scores.json`, announcing a new high score.
+- Functions each do one job, errors are handled with specific exceptions, the file paths use `pathlib`, and the entry point is guarded.
+
+A suggested design is `load_json`, `save_json`, `ask(item)`, `run()`. A sample data file to start from:
+```
+[
+  {"question": "Which keyword defines a function?", "options": ["func", "def", "lambda"], "answer": 1},
+  {"question": "What type is *args?", "options": ["list", "tuple", "dict"], "answer": 1}
+]
+```
+Stretch goals: shuffle the questions with `random.shuffle`, add a timer using the decorator from Week 1, or turn the quiz into a `Quiz` class.
+
+## Part 6: How this connects to Flask
+In Week 9 your API will accept and return JSON constantly: `request.get_json()` reads it and `jsonify(...)` produces it, using exactly the rules above. And the `load_json`/`save_json` pair is a first, simple version of storing data, which Week 5 will upgrade to a proper database.
+
+## Recap
+- Build paths with `pathlib`, relative to `Path(__file__).parent`, to avoid working-directory surprises.
+- Use `with open(..., encoding="utf-8")`. `"w"` erases, `"a"` appends, `"x"` refuses to overwrite.
+- JSON needs double quotes and has no sets or dates. `dump`/`load` work with files, `dumps`/`loads` with strings.
+- Handle missing and corrupt files deliberately, with specific exceptions.
+===TASKS===
+### Write and read a file | guided
+Create `notes.txt` with three lines using `with open(..., "w", encoding="utf-8")`. Read it back with `read()`, then again by looping over the file and printing each line without the trailing newline.
+HINT: Use `line.strip()` or `print(line, end="")` to avoid blank lines.
+EXPECT: The three lines printed twice, once as one block and once line by line.
+SOL:
+```python
+with open("notes.txt", "w", encoding="utf-8") as f:
+    f.write("one\ntwo\nthree\n")
+
+with open("notes.txt", encoding="utf-8") as f:
+    print(f.read())
+
+with open("notes.txt", encoding="utf-8") as f:
+    for line in f:
+        print(line.strip())
+```
+### A JSON round trip | guided
+Save `{"name": "Rover", "battery": 80, "online": True, "owner": None}` to `robot.json` with `indent=2`. Open the file in your editor and notice how `True` and `None` appear. Then load it and print the types of `online` and `owner`.
+HINT: Use `json.dump` to a file and `json.load` to read it back.
+EXPECT: The file shows `true` and `null`, and after loading Python shows `True` and `None` again.
+SOL:
+```python
+import json
+
+robot = {"name": "Rover", "battery": 80, "online": True, "owner": None}
+with open("robot.json", "w", encoding="utf-8") as f:
+    json.dump(robot, f, indent=2)
+
+with open("robot.json", encoding="utf-8") as f:
+    loaded = json.load(f)
+print(loaded["online"], loaded["owner"], loaded == robot)
+```
+### Reusable load and save | independent
+Write `load_json(path, default)` and `save_json(path, data)` as in Part 4. Test them with asserts: loading a missing file returns the default, saving then loading returns the same data, and a file containing `{bad json` returns the default.
+HINT: Use `Path.write_text` to create the corrupt file for the last test.
+EXPECT: All asserts pass.
+SOL:
+```python
+import json
+from pathlib import Path
+
+def load_json(path, default):
+    if not path.exists():
+        return default
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return default
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+p = Path("test.json")
+p.unlink(missing_ok=True)
+assert load_json(p, []) == []
+save_json(p, {"a": 1})
+assert load_json(p, None) == {"a": 1}
+p.write_text("{bad json", encoding="utf-8")
+assert load_json(p, "fallback") == "fallback"
+```
+### Fix the three bugs | debugging
+(a) `open("questions.json")` raises `FileNotFoundError` when you run the script from a different folder. (b) `json.load` raises `JSONDecodeError` on a file containing `{'a': 1,}`. (c) `json.dump({"tags": {1, 2}}, f)` raises a `TypeError` about sets. Explain each cause and the fix.
+HINT: (a) is about the working directory, (b) about JSON rules, and (c) about types JSON does not have.
+SOL:
+(a) The relative path is resolved from the current working directory. Use `Path(__file__).parent / "questions.json"`.
+(b) JSON requires double quotes and forbids trailing commas. Write `{"a": 1}`.
+(c) JSON has no set. Convert it: `{"tags": list({1, 2})}`, or use `default=list`.
+### The CLI quiz app | challenge
+Build the quiz described in Part 5 in a folder with `quiz.py` and `questions.json`. Include at least five questions, re-asking on invalid input, a saved best score, and a guarded entry point. Run it three times and confirm the high score behaves correctly.
+HINT: Keep the loop that validates input inside `ask`, with `try/except ValueError`, and compare against the saved best only after the quiz ends.
+EXPECT: The program asks every question, shows `You scored X/N`, and prints `New high score!` only when you beat the saved best.
+SOL:
+```python
+import json
+from pathlib import Path
+
+BASE = Path(__file__).parent
+QUESTIONS = BASE / "questions.json"
+SCORES = BASE / "scores.json"
+
+def load_json(path, default):
+    if not path.exists():
+        return default
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return default
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+def ask(item):
+    for i, option in enumerate(item["options"], start=1):
+        print(f"  {i}. {option}")
+    while True:
+        try:
+            choice = int(input("Your answer: "))
+            if 1 <= choice <= len(item["options"]):
+                return choice - 1 == item["answer"]
+        except ValueError:
+            pass
+        print("Please enter a valid number.")
+
+def run():
+    questions = load_json(QUESTIONS, [])
+    if not questions:
+        print("No questions found.")
+        return
+    score = 0
+    for number, item in enumerate(questions, start=1):
+        print(f"\nQ{number}. {item['question']}")
+        score += ask(item)
+    print(f"\nYou scored {score}/{len(questions)}")
+    scores = load_json(SCORES, {"best": 0})
+    if score > scores["best"]:
+        scores["best"] = score
+        save_json(SCORES, scores)
+        print("New high score!")
+
+if __name__ == "__main__":
+    run()
+```
+===QUIZ===
+Q: What does opening an existing file with mode `"w"` do to its current contents?
+- Appends new text after them
+- Keeps them and raises an error
+- Erases them immediately, then lets you write *
+- Opens the file read-only
+WHY: Write mode truncates the file to empty as soon as it is opened. Use `"a"` to append, or `"x"` to refuse when the file already exists.
+Q: Which `json` function reads JSON from an open file object? Give the name with or without the module prefix.
+TYPE: load | json.load
+WHY: `load` and `dump` work with files. The versions ending in `s`, `loads` and `dumps`, work with strings.
+Q: What does this print?
+```python
+import json
+print(json.dumps({"a": True, "b": None}))
+```
+- `{'a': True, 'b': None}`
+- `{"a": true, "b": null}` *
+- `{"a": "True", "b": "None"}`
+- A `TypeError`
+WHY: JSON uses lowercase `true` and `null` and double quotes. `dumps` converts Python values into JSON text.
+Q: Which of these strings is **not** valid JSON?
+- `{"a": 1}`
+- `[1, 2, 3]`
+- `{'a': 1}` *
+- `{"a": null}`
+WHY: JSON requires double quotes around keys and strings, so single quotes fail with `JSONDecodeError`.
+Q: What does this print?
+```python
+with open("x.txt", "w", encoding="utf-8") as f:
+    f.write("a")
+with open("x.txt", "w", encoding="utf-8") as f:
+    f.write("b")
+print(open("x.txt", encoding="utf-8").read())
+```
+- `a`
+- `ab`
+- `b` *
+- A `FileExistsError`
+WHY: Each `"w"` open erases the file first, so the second write replaces the first.
+Q: Which mode letter opens a file for appending to the end?
+TYPE: a
+WHY: `"a"` keeps the existing content and writes new data after it. It creates the file if it does not exist.
+Q: What happens when you call `json.dump({"tags": {1, 2}}, f)`?
+- It writes `{"tags": [1, 2]}`
+- A `TypeError`, because a set is not JSON serializable *
+- It writes `{"tags": "{1, 2}"}`
+- A `JSONDecodeError`
+WHY: JSON has no set type. Convert it to a list first or pass `default=list`.
+Q: Why use `Path(__file__).parent / "questions.json"` instead of just `"questions.json"`?
+- It makes the file load faster
+- The path is resolved relative to the script's folder, not the terminal's current folder *
+- Relative paths are not allowed in Python
+- It encrypts the path
+WHY: A bare relative path depends on the working directory when the program starts. A script-relative path works from anywhere.
+Q: What does this evaluate to?
+```python
+import json
+json.loads('{"n": 1}')["n"] + 1
+```
+- `11`
+- `2` *
+- `'11'`
+- A `TypeError`
+WHY: `loads` turns the JSON text into a dictionary, `["n"]` gives the integer 1, and `+ 1` adds normally.
+Q: Which exception does `open("missing.txt")` raise when the file does not exist?
+TYPE: FileNotFoundError
+WHY: It is a subclass of `OSError`. You can catch it specifically and decide whether to create a default or stop.
+</script>
 <script>
 const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
