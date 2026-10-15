@@ -9874,6 +9874,1971 @@ Q: Why is the stand-in `/dev/login/<id>` route restricted to debug or test mode?
 - It needs a template
 WHY: It has no password check at all. It is scaffolding until real authentication arrives in Week 8.
 </script>
+<script type="text/markdown" id="n-7-1">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain what an ORM is and what it costs and gives you compared with the raw SQL of Weeks 5 and 6, create an engine and read the SQL it sends, define tables as Python classes with the current SQLAlchemy 2 style, create, read, update and delete rows through a session, explain the session's unit of work and identity map, handle the errors beginners meet (`DetachedInstanceError`, `PendingRollbackError`), and mix ORM code with raw SQL when that is the better tool.
+
+Every ORM example in this lesson has the raw SQL it replaces next to it. The aim is not to make you forget SQL. It is to make you fluent in both, so you can choose.
+
+## Part 1: What an ORM is
+Your code works with **objects** (a `Lesson` with a `.title`), while the database stores **rows** in tables. Translating between the two by hand, as you did with `sqlite3`, means writing the same boilerplate again and again: build the SQL string, pass the parameters, turn each result row into a dictionary or object, remember to commit. An **ORM (Object-Relational Mapper)** does the translation for you: you describe tables as classes, and it generates the SQL, runs it, and hands back objects.
+
+**SQLAlchemy** is Python's standard ORM and toolkit. It has two layers:
+- **Core:** a Pythonic way to build and run SQL expressions (`select(...)`, `text(...)`), with connection handling.
+- **ORM:** classes mapped to tables, built on Core.
+
+**An honest comparison of the two routes.**
+- **Raw SQL (`sqlite3`):** total control, nothing hidden, no new library. But repetitive, easy to forget a commit or a placeholder, rows are tuples unless you configure them, and the SQL is locked to one database dialect.
+- **ORM:** much less boilerplate, objects with attributes, parameters bound automatically (no injection by accident), one codebase for SQLite and PostgreSQL, and relationships you navigate with dots. The costs are a learning curve, a layer that can generate surprising SQL (you must learn to look at it), and awkwardness for complex reporting queries.
+
+Professionals use both: the ORM for everyday reads and writes, raw SQL (through `text()`) for the heavy queries. That is how this course will treat it.
+
+## Part 2: Install and connect
+```powershell
+python -m pip install sqlalchemy
+```
+```python
+from sqlalchemy import create_engine
+
+engine = create_engine("sqlite:///hub.db", echo=True)
+```
+- The **engine** is SQLAlchemy's connection factory and pool. You create **one per application**, not one per query.
+- `"sqlite:///hub.db"` is a **database URL**: `dialect:///path`. The three slashes mean a relative file path. `"sqlite://"` with nothing after it is an **in-memory** database, perfect for experiments and tests. For PostgreSQL later you would write `postgresql://user:password@host/dbname`, and nothing else in your code changes.
+- `echo=True` makes SQLAlchemy **print every SQL statement it runs**. Keep it on while learning. The habit of reading the generated SQL is what keeps an ORM honest.
+
+## Part 3: Defining tables as classes
+```python
+from typing import Optional
+from sqlalchemy import String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase):
+    pass
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+
+    id:    Mapped[int]           = mapped_column(primary_key=True)
+    title: Mapped[str]           = mapped_column(String(120), unique=True)
+    week:  Mapped[int]
+    done:  Mapped[bool]          = mapped_column(default=False)
+    note:  Mapped[Optional[str]]
+
+    def __repr__(self):
+        return f"<Lesson {self.id} {self.title!r}>"
+```
+The raw SQL this produces:
+```sql
+CREATE TABLE lessons (
+    id    INTEGER NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    week  INTEGER NOT NULL,
+    done  BOOLEAN NOT NULL,
+    note  VARCHAR,
+    PRIMARY KEY (id),
+    UNIQUE (title)
+)
+```
+Read the mapping:
+- `Base` is the parent of all your models. It keeps a catalogue (`Base.metadata`) of every table.
+- `__tablename__` names the table. Use it explicitly and stay consistent with Week 5 and 6 (`lessons`, plural).
+- **`Mapped[int]` is both a Python type hint and the column type.** `Mapped[int]` becomes `INTEGER NOT NULL`, `Mapped[str]` becomes `VARCHAR NOT NULL`, `Mapped[bool]` becomes `BOOLEAN` (stored as 0 or 1 in SQLite).
+- **`Optional[str]` means nullable.** The type hint decides `NOT NULL` or not: no `Optional` means `NOT NULL`. This is the reverse of SQL, where you must write `NOT NULL` yourself, and a common source of confusion.
+- `mapped_column(...)` adds details: `primary_key=True`, `unique=True`, a length with `String(120)`, a `default`.
+- **`default=False` is a Python-side default.** SQLAlchemy fills it in when *it* inserts a row. A raw SQL insert that leaves out `done` would not get it, and the `NOT NULL` would fail. To make the **database** supply the default for every writer, use `server_default="0"`, which becomes `DEFAULT 0` in the table.
+- `__repr__` is a convenience so that printing a lesson shows something useful.
+
+Create the tables:
+```python
+Base.metadata.create_all(engine)
+```
+`create_all` issues `CREATE TABLE` for each model **if the table does not exist yet**. It never alters an existing table, which is why Lesson 7-5 brings in migrations. It is the ORM equivalent of the `IF NOT EXISTS` schema file from Lesson 5-5.
+
+## Part 4: The session and the unit of work
+You do not talk to the engine directly for ORM work. You use a **Session**: a workspace that tracks the objects you load or create and, when you say so, writes all the changes to the database in **one transaction**. This pattern is called the **unit of work**.
+```python
+from sqlalchemy.orm import Session
+
+with Session(engine) as session:
+    lesson = Lesson(title="SQL basics", week=5)
+    session.add(lesson)
+    session.commit()
+    print(lesson.id)
+```
+- `with Session(engine) as session:` creates a session and **closes it** at the end of the block.
+- `Lesson(title=..., week=...)` creates an ordinary Python object. Nothing has touched the database yet.
+- `session.add(lesson)` tells the session to track it. Still no SQL.
+- `session.commit()` is the moment the `INSERT` runs and the transaction is committed. If you forget it, the change is lost, exactly like the forgotten `commit()` of Lesson 5-1.
+- `lesson.id` now has a value, filled in by the database. (This is the ORM's `lastrowid`.)
+
+**Raw SQL equivalent:**
+```python
+cur = conn.execute("INSERT INTO lessons (title, week, done) VALUES (?, ?, 0)", ("SQL basics", 5))
+conn.commit()
+print(cur.lastrowid)
+```
+
+Related methods:
+- `session.flush()` sends pending SQL **without committing**, so you can get ids early. A later `rollback()` can still undo it. The session also flushes automatically before queries.
+- `session.rollback()` discards everything since the last commit. After a failed flush or commit (such as an `IntegrityError`) you **must** call `rollback()` before using the session again, or you will see `PendingRollbackError`.
+
+## Part 5: Create, read, update, delete
+**Read:**
+```python
+from sqlalchemy import select
+
+lessons = session.scalars(select(Lesson).where(Lesson.week >= 5).order_by(Lesson.id)).all()
+one = session.get(Lesson, 1)          # by primary key, or None
+```
+```sql
+SELECT * FROM lessons WHERE week >= 5 ORDER BY id;
+SELECT * FROM lessons WHERE id = 1;
+```
+- `select(Lesson)` builds the query. Nothing runs until you execute it.
+- `session.scalars(stmt)` runs it and returns the model objects themselves. `.all()` gives a list, `.first()` the first or `None`.
+- `session.get(Lesson, 1)` is the shortcut for a primary key lookup. It returns `None` when the row does not exist.
+
+**Update, just change the attribute:**
+```python
+lesson = session.get(Lesson, 1)
+lesson.done = True
+session.commit()
+```
+```sql
+UPDATE lessons SET done = 1 WHERE id = 1;
+```
+The session notices that the object changed ("dirty tracking") and writes the `UPDATE` at commit. Only the changed columns are included.
+
+**Delete:**
+```python
+session.delete(lesson)
+session.commit()
+```
+```sql
+DELETE FROM lessons WHERE id = 1;
+```
+Notice what is **missing** from all of these: no placeholders, no tuples, no SQL strings. SQLAlchemy sends the values as bound parameters, so SQL injection through these calls is not possible.
+
+## Part 6: The identity map and expiry
+Two behaviours of the session surprise everyone, so learn them now.
+
+**Identity map.** Within one session, each database row is represented by **one** Python object.
+```python
+a = session.get(Lesson, 1)
+b = session.get(Lesson, 1)
+print(a is b)         # True, and the second call did not even query
+```
+This guarantees consistency (changing `a` is seen through `b`) and saves queries. It also means that objects are tied to the session that loaded them.
+
+**Expiry after commit.** By default, `commit()` **expires** every object in the session: their loaded attributes are discarded, and the next time you read an attribute SQLAlchemy runs a fresh `SELECT`. The reason is safety, since after a commit the database may differ from your copy. The consequence:
+```python
+with Session(engine) as session:
+    lesson = session.get(Lesson, 1)
+    session.commit()
+# session is closed here
+print(lesson.title)    # DetachedInstanceError: the object is expired and has no session to reload from
+```
+`DetachedInstanceError` means "you touched an attribute that needs the database, but the session is gone." Three fixes:
+- Read what you need **before** the session closes (convert to a dictionary or a number).
+- Stay inside the `with` block while you use the objects.
+- Create the session with `Session(engine, expire_on_commit=False)` when you knowingly want to keep using objects afterwards.
+(If you load objects and close the session **without** committing, the loaded attributes are still available, which is why this error appears only in some programs.)
+
+## Part 7: Raw SQL, whenever you want it
+SQLAlchemy never traps you in the ORM. For any query that is easier in SQL, use `text()` with **named parameters**:
+```python
+from sqlalchemy import text
+
+rows = session.execute(
+    text("SELECT week, COUNT(*) AS n FROM lessons WHERE week >= :w GROUP BY week"),
+    {"w": 5},
+).all()
+```
+- `:w` is a **bound parameter**, the SQLAlchemy equivalent of `?`. The value goes in the dictionary and is never glued into the text.
+- Rows come back as named tuples: `row.week`, `row.n`.
+- The warning from Lesson 5-2 still applies fully: **never format user input into the string** with an f-string. Always use `:name` parameters.
+
+You can also run `session.execute(text("PRAGMA foreign_keys = ON"))` and similar statements this way.
+
+## Part 8: Atomic updates, the ORM version
+In Lesson 5-3 you learned that `views = views + 1` must happen in SQL to avoid lost updates. The ORM gives you both routes, and again one is safe.
+- **Route A, change the attribute in Python:** `lesson.views += 1`. Outcome: SQLAlchemy reads the value, adds one in Python, and writes the result. Two requests at once can both write the same number, losing a view.
+- **Route B, let the database add:** 
+```python
+from sqlalchemy import update
+session.execute(update(Lesson).where(Lesson.id == 1).values(views=Lesson.views + 1))
+session.commit()
+```
+```sql
+UPDATE lessons SET views = views + 1 WHERE id = 1;
+```
+Outcome: `Lesson.views + 1` is an **SQL expression**, not a Python addition, so the database does it atomically. Use it whenever the new value depends on the old one.
+
+## Part 9: Common mistakes
+- Forgetting `commit()`, so nothing is saved.
+- Using objects after the session closed (`DetachedInstanceError`).
+- Continuing to use a session after an exception without `rollback()` (`PendingRollbackError`).
+- Reading `Optional` backwards and getting `NOT NULL` columns you meant to be nullable, or the reverse.
+- Believing `create_all` will alter a table. It only creates missing tables.
+- Putting user input into `text()` with an f-string.
+- Never looking at `echo=True` output, then being surprised by the number of queries.
+
+## Recap
+- An ORM maps classes to tables and rows to objects. SQLAlchemy has Core (SQL building) and the ORM on top, and you can always drop to `text()`.
+- `create_engine` once per app, with `echo=True` while learning. `Mapped[...]` and `mapped_column` define columns, and `Optional` means nullable.
+- A `Session` tracks objects and writes them in one transaction on `commit()`. `add`, `get`, `select`, attribute changes and `delete` cover create, read, update and delete.
+- The identity map gives one object per row per session, and commit expires objects, which causes `DetachedInstanceError` after the session closes.
+- Use SQL expressions (`Lesson.views + 1`) for atomic updates, and bound parameters (`:name`) for raw SQL.
+
+===TASKS===
+### Engine, model and the SQL behind it | guided
+Install SQLAlchemy. Define the `Lesson` model from Part 3 with an in-memory engine and `echo=True`. Call `create_all` and copy the `CREATE TABLE` statement that SQLAlchemy printed. Compare it, column by column, with the table you would have written by hand in Week 5, and list every difference you notice.
+HINT: Use `create_engine("sqlite://", echo=True)`. Look at how `Optional` and `default=False` affect the generated statement.
+EXPECT: A `CREATE TABLE lessons` with `NOT NULL` on every column except `note`, a `UNIQUE (title)`, and no `DEFAULT` on `done` (the Python default lives in the ORM, not the table).
+SOL:
+```python
+from typing import Optional
+from sqlalchemy import create_engine, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+class Base(DeclarativeBase):
+    pass
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(120), unique=True)
+    week: Mapped[int]
+    done: Mapped[bool] = mapped_column(default=False)
+    note: Mapped[Optional[str]]
+
+engine = create_engine("sqlite://", echo=True)
+Base.metadata.create_all(engine)
+```
+### CRUD, ORM next to raw SQL | guided
+In one script, do each operation twice, once with the ORM and once with raw `text()` SQL on the same table: insert three lessons, select the lessons of week 5 or later ordered by id, mark one done, delete one. After each pair, assert that both routes see the same rows. Run it with `echo=True` and find the `INSERT`, `UPDATE` and `DELETE` statements the ORM sent.
+HINT: For the raw route use `session.execute(text(...), {...})` with named parameters, and `session.commit()` after changes.
+EXPECT: All assertions pass, and the echoed `UPDATE` only mentions the column you changed.
+SOL:
+```python
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
+with Session(engine) as s:
+    s.add_all([Lesson(title="Setup", week=1), Lesson(title="SQL", week=5), Lesson(title="Joins", week=6)])
+    s.commit()
+
+    orm = [l.title for l in s.scalars(select(Lesson).where(Lesson.week >= 5).order_by(Lesson.id))]
+    raw = [r.title for r in s.execute(text("SELECT title FROM lessons WHERE week >= :w ORDER BY id"), {"w": 5})]
+    assert orm == raw == ["SQL", "Joins"]
+
+    s.get(Lesson, 2).done = True
+    s.commit()
+    assert s.execute(text("SELECT done FROM lessons WHERE id = 2")).scalar_one() == 1
+
+    s.delete(s.get(Lesson, 1))
+    s.commit()
+    assert s.execute(text("SELECT COUNT(*) FROM lessons")).scalar_one() == 2
+```
+### Session behaviour experiments | independent
+Write four small experiments: (1) prove the identity map with `is` and count the SQL statements for two `session.get` calls (use `echo=True` or an event listener); (2) reproduce `DetachedInstanceError` by committing and then reading an attribute after closing the session, then fix it in two different ways; (3) trigger an `IntegrityError` by inserting a duplicate title, show that using the session again without `rollback()` raises `PendingRollbackError`, and fix it; (4) show that loading an object and closing the session **without** committing still lets you read it. Write one sentence for each explaining what the session is doing.
+HINT: A duplicate title violates `UNIQUE (title)`. Catch `sqlalchemy.exc.IntegrityError`. `PendingRollbackError` comes from `sqlalchemy.exc`.
+EXPECT: Two `get` calls produce one `SELECT`, the detached read fails and both fixes work, the second use of the session fails until `rollback()` is called, and the uncommitted case prints the title.
+SOL:
+```python
+from sqlalchemy.exc import IntegrityError, PendingRollbackError
+
+# 1
+with Session(engine) as s:
+    a, b = s.get(Lesson, 2), s.get(Lesson, 2)
+    print(a is b)
+
+# 2
+with Session(engine) as s:
+    lesson = s.get(Lesson, 2)
+    s.commit()
+try:
+    print(lesson.title)
+except Exception as e:
+    print(type(e).__name__)
+with Session(engine) as s:
+    lesson = s.get(Lesson, 2); s.commit(); title = lesson.title     # fix 1: read inside
+with Session(engine, expire_on_commit=False) as s:
+    lesson = s.get(Lesson, 2); s.commit()
+print(lesson.title)                                                  # fix 2
+
+# 3
+with Session(engine) as s:
+    s.add(Lesson(title="SQL", week=9))
+    try:
+        s.commit()
+    except IntegrityError:
+        try:
+            s.scalars(select(Lesson)).all()
+        except PendingRollbackError:
+            print("needs rollback")
+        s.rollback()
+        print(len(s.scalars(select(Lesson)).all()))
+```
+### Python defaults versus server defaults | independent
+Add `views: Mapped[int] = mapped_column(default=0)` to the model and a second column `likes: Mapped[int] = mapped_column(server_default="0")`. Recreate the table. Insert one lesson through the ORM and one with raw SQL that leaves both columns out, and record what happens to each. Explain which default protects you when a different program writes to the table, and why migrations from Week 6 make the `server_default` the safer habit for `NOT NULL` columns.
+HINT: A raw insert such as `INSERT INTO lessons (title, week, done) VALUES ('X', 1, 0)` leaves `views` and `likes` out.
+EXPECT: The ORM insert fills both. The first raw insert fails with `NOT NULL constraint failed: lessons.views`. Adding `views` to the raw insert makes it succeed, and `likes` gets 0 from the server default.
+SOL:
+```python
+class Lesson(Base):
+    __tablename__ = "lessons"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(120), unique=True)
+    week: Mapped[int]
+    done: Mapped[bool] = mapped_column(default=False)
+    views: Mapped[int] = mapped_column(default=0)
+    likes: Mapped[int] = mapped_column(server_default="0")
+
+Base.metadata.create_all(engine)
+with Session(engine) as s:
+    s.add(Lesson(title="ORM", week=7)); s.commit()
+    try:
+        s.execute(text("INSERT INTO lessons (title, week, done) VALUES ('Raw', 7, 0)"))
+    except Exception as e:
+        print(type(e).__name__, e.orig)
+        s.rollback()
+    s.execute(text("INSERT INTO lessons (title, week, done, views) VALUES ('Raw2', 7, 0, 0)"))
+    s.commit()
+    print(s.execute(text("SELECT title, views, likes FROM lessons")).all())
+# Only server_default lives in the table, so it protects every writer.
+```
+### Port the lessons store | challenge
+Take the `store.py` from Lesson 5-3 (`add_lesson`, `get_lesson`, `mark_done`, `record_view`, `soft_delete`, `restore`) and write `orm_store.py` with the same function names, arguments and return values, using SQLAlchemy. Use an atomic SQL expression for `record_view`. Then write **one** test suite that runs against **both** implementations (parametrise over the two modules, or loop over them) so that the raw and ORM versions are proven to behave identically, including duplicate titles returning `None` and soft-deleted lessons being invisible.
+HINT: Give each module a `make(path_or_url)` function returning whatever handle it needs, so the shared test can create a fresh database for each. Catch `IntegrityError` in `add_lesson` and roll back.
+EXPECT: The same test file passes for both implementations, and you can point to the lines where each handles the unique constraint and the atomic counter.
+SOL:
+```python
+# orm_store.py
+from sqlalchemy import create_engine, select, update, String
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+
+class Base(DeclarativeBase):
+    pass
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(120), unique=True)
+    week: Mapped[int]
+    done: Mapped[bool] = mapped_column(default=False)
+    views: Mapped[int] = mapped_column(default=0)
+    deleted: Mapped[bool] = mapped_column(default=False)
+
+def make(url="sqlite://"):
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    return Session(engine)
+
+def add_lesson(s, title, week):
+    lesson = Lesson(title=title, week=week)
+    s.add(lesson)
+    try:
+        s.commit()
+    except IntegrityError:
+        s.rollback()
+        return None
+    return lesson.id
+
+def get_lesson(s, lesson_id):
+    l = s.scalars(select(Lesson).where(Lesson.id == lesson_id, Lesson.deleted == False)).first()
+    return None if l is None else {"id": l.id, "title": l.title, "week": l.week,
+                                   "done": int(l.done), "views": l.views, "deleted": 0}
+
+def _change(s, lesson_id, **values):
+    result = s.execute(update(Lesson).where(Lesson.id == lesson_id).values(**values))
+    s.commit()
+    return result.rowcount == 1
+
+def mark_done(s, i):   return _change(s, i, done=True)
+def record_view(s, i): return _change(s, i, views=Lesson.views + 1)
+def soft_delete(s, i): return _change(s, i, deleted=True)
+def restore(s, i):     return _change(s, i, deleted=False)
+```
+===QUIZ===
+Q: What does an ORM do?
+- Compiles Python to SQL files
+- Maps classes to tables and rows to objects, generating the SQL for you *
+- Replaces the database
+- Encrypts the data
+WHY: It translates between objects in your code and rows in tables, removing repeated boilerplate.
+Q: What is the engine in SQLAlchemy?
+- A single query
+- The connection factory and pool, created once per application *
+- A model class
+- A migration tool
+WHY: You create one engine and every session borrows connections from it.
+Q: Which argument makes SQLAlchemy print every SQL statement it runs?
+TYPE: echo=True | echo
+WHY: It keeps the generated SQL visible, which is essential for learning and debugging an ORM.
+Q: How does `Mapped[Optional[str]]` differ from `Mapped[str]`?
+- No difference
+- The first allows NULL, the second is NOT NULL *
+- The first is longer
+- The second is unique
+WHY: The type hint decides nullability, the reverse of plain SQL where you must write NOT NULL.
+Q: When is the `INSERT` for `session.add(lesson)` actually sent?
+- Immediately at `add`
+- At `flush` or `commit`, not at `add` *
+- Never
+- When the object is created
+WHY: The session collects changes and writes them together as a unit of work.
+Q: What does `session.get(Lesson, 1)` return if there is no row with id 1?
+- An exception
+- `None` *
+- An empty Lesson
+- `0`
+WHY: It returns the object or `None`, so you check for `None` and abort with 404 in a view.
+Q: After `commit()`, why can reading `lesson.title` fail with `DetachedInstanceError` once the session is closed?
+- The title was deleted
+- Commit expires the attributes, and without a session they cannot be reloaded *
+- Titles are private
+- Sessions delete objects
+WHY: Reload requires a live session. Read what you need before closing, or use `expire_on_commit=False`.
+Q: What must you do after an `IntegrityError` during `commit()` before using the session again?
+TYPE: rollback | session.rollback()
+WHY: Without it the session is in a failed state and raises `PendingRollbackError`.
+Q: Which update is safe against lost updates when two requests increment a counter at once?
+- `lesson.views += 1`
+- `update(Lesson).values(views=Lesson.views + 1)` *
+- Reading views, adding one in Python, saving
+- Deleting and re-adding the lesson
+WHY: The database performs the addition in one atomic statement.
+Q: Which is the right way to put a user-supplied number into raw SQL with SQLAlchemy?
+- An f-string
+- `text("... WHERE week >= :w")` with `{"w": value}` *
+- String concatenation
+- `str(value)` inside the SQL
+WHY: Named parameters are bound separately from the SQL text, which prevents injection.
+</script>
+<script type="text/markdown" id="n-7-2">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to set up Flask-SQLAlchemy, explain what it adds on top of plain SQLAlchemy, define models with `db.Model` (and avoid the table-name surprise), explain why `create_all` needs an app context, write list, detail, create, update and delete views backed by the ORM next to the SQL each one replaces, turn constraint errors into friendly messages with a proper `rollback`, paginate results, translate older tutorial code into current style, and test with an in-memory database.
+
+This is the lesson that matches the NeuralNine video. That video is a good introduction, but tutorials age quickly: some of its code uses the older style described in Part 8. When something in a video does not work, check that part first.
+
+## Part 1: What the extension adds
+In Lesson 7-1 you managed the engine and the session yourself. In a web app you would need to create a session for each request, close it at the end, keep the engine somewhere global, and connect all of that to Flask's configuration and testing. **Flask-SQLAlchemy** does that wiring:
+- It creates the engine from your Flask config.
+- It gives you **`db.session`**, a session that is **scoped to the current request**: created the first time you use it, and cleaned up automatically when the request ends. You no longer write the `get_db` / `teardown` code of Lesson 5-5.
+- It offers helpers such as `db.get_or_404`, `db.first_or_404` and `db.paginate`.
+- It integrates with the Flask CLI and with Flask-Migrate (Lesson 7-5).
+
+It does **not** change SQLAlchemy itself. Everything from Lesson 7-1 still applies.
+
+## Part 2: Setup
+```powershell
+python -m pip install flask-sqlalchemy
+```
+```python
+# extensions.py
+from sqlalchemy.orm import DeclarativeBase
+from flask_sqlalchemy import SQLAlchemy
+
+class Base(DeclarativeBase):
+    pass
+
+db = SQLAlchemy(model_class=Base)
+```
+```python
+# app.py
+from flask import Flask
+from extensions import db
+
+def create_app(config=None):
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///hub.db"
+    app.config["SECRET_KEY"] = "dev-only-key"
+    if config:
+        app.config.update(config)
+    db.init_app(app)
+    return app
+
+app = create_app()
+```
+What each piece does:
+- `db = SQLAlchemy(model_class=Base)` creates the extension object **without an app**. It lives in its own module so that models can import `db` without importing `app` (which would be a circular import).
+- `db.init_app(app)` connects it to an app. This `init_app` pattern is the same one you wrote by hand in Lesson 5-5, and it is how every Flask extension works.
+- `create_app(config)` is a **factory function** that builds an app. Tests can call it with different settings (an in-memory database), and Week 8's blueprints build on it. Flask finds `app` or `create_app` automatically, so `flask --app app run` works.
+- `SQLALCHEMY_DATABASE_URI` is the database URL from Lesson 7-1.
+
+**A surprise worth knowing:** for SQLite, a **relative path** in the URI (`sqlite:///hub.db`) is resolved against Flask's **instance folder**, a folder called `instance` next to your app. So the file ends up at `instance/hub.db`, not next to `app.py`. Add `instance/` to `.gitignore`. This is deliberate: it keeps generated data separate from code.
+
+## Part 3: Models with db.Model
+```python
+# models.py
+from typing import Optional
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
+from extensions import db
+
+class Lesson(db.Model):
+    __tablename__ = "lessons"
+
+    id:    Mapped[int]  = mapped_column(primary_key=True)
+    title: Mapped[str]  = mapped_column(String(120), unique=True)
+    week:  Mapped[int]
+    done:  Mapped[bool] = mapped_column(default=False, server_default="0")
+    views: Mapped[int]  = mapped_column(default=0, server_default="0")
+```
+It is the same mapping as in Lesson 7-1, except the parent class is `db.Model`. 
+
+**The table-name surprise.** If you leave out `__tablename__`, Flask-SQLAlchemy invents one by converting the class name to snake case, **singular**: `Lesson` becomes a table named `lesson`, not `lessons`. That is fine until you meet your own earlier schema (`lessons`) or a colleague's SQL. State the name explicitly and keep it consistent.
+
+## Part 4: Creating tables and the app context
+```python
+from app import app
+from extensions import db
+import models                       # makes sure the models are registered
+
+with app.app_context():
+    db.create_all()
+```
+`db.session` and `db.create_all()` need to know **which app** they belong to. Flask provides that through the **application context** (the same one you used with `g` in Lesson 5-5). Inside a request it exists automatically. In a script, a shell or a test, you create it with `with app.app_context():`. Forgetting it gives `RuntimeError: Working outside of application context`.
+
+Two further notes. The `import models` line matters: `create_all` only knows about models that have been **imported**, so an unimported model silently gets no table. And `create_all` still only creates **missing** tables, so use migrations (Lesson 7-5) once real data exists.
+
+## Part 5: CRUD views, each next to its SQL
+**List.**
+```python
+@app.route("/lessons")
+def lessons():
+    rows = db.session.scalars(db.select(Lesson).order_by(Lesson.week, Lesson.id)).all()
+    return render_template("lessons.html", lessons=rows)
+```
+```sql
+SELECT * FROM lessons ORDER BY week, id;
+```
+`db.select` is just SQLAlchemy's `select`, available on `db` for convenience.
+
+**Detail, with automatic 404.**
+```python
+@app.route("/lesson/<int:lesson_id>")
+def lesson(lesson_id):
+    item = db.get_or_404(Lesson, lesson_id)
+    return render_template("lesson.html", lesson=item)
+```
+```sql
+SELECT * FROM lessons WHERE id = ?;      -- and abort(404) if no row
+```
+`db.get_or_404` replaces the `fetchone()` / `if row is None: abort(404)` pair from Lesson 5-5.
+
+**Create, with Post/Redirect/Get and constraint handling.**
+```python
+from sqlalchemy.exc import IntegrityError
+
+@app.route("/lessons/new", methods=["GET", "POST"])
+def new_lesson():
+    errors = {}
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        week = request.form.get("week", type=int)
+        if not title:
+            errors["title"] = "Title is required."
+        if week is None or not 1 <= week <= 12:
+            errors["week"] = "Week must be 1 to 12."
+        if not errors:
+            db.session.add(Lesson(title=title, week=week))
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                errors["title"] = "A lesson with that title already exists."
+            else:
+                flash("Lesson added.", "success")
+                return redirect(url_for("lessons"))
+        return render_template("new_lesson.html", errors=errors, values=request.form), 400
+    return render_template("new_lesson.html", errors=errors, values={})
+```
+```sql
+INSERT INTO lessons (title, week, done, views) VALUES (?, ?, 0, 0);
+-- UNIQUE constraint failed: lessons.title  ->  IntegrityError
+```
+The pattern is the one from Lesson 5-3: let the **constraint** be the source of truth for uniqueness (no racy pre-check), catch `IntegrityError`, **`rollback()`**, and tell the user. Without the rollback the session is unusable for the rest of the request.
+
+**Update.**
+```python
+@app.post("/lesson/<int:lesson_id>/done")
+def mark_done(lesson_id):
+    item = db.get_or_404(Lesson, lesson_id)
+    item.done = True
+    db.session.commit()
+    return redirect(url_for("lesson", lesson_id=lesson_id))
+```
+```sql
+UPDATE lessons SET done = 1 WHERE id = ?;
+```
+**Delete, POST only.**
+```python
+@app.post("/lesson/<int:lesson_id>/delete")
+def delete_lesson(lesson_id):
+    db.session.delete(db.get_or_404(Lesson, lesson_id))
+    db.session.commit()
+    flash("Lesson deleted.", "success")
+    return redirect(url_for("lessons"))
+```
+```sql
+DELETE FROM lessons WHERE id = ?;
+```
+Deleting uses POST, never GET, for the safety reasons you learned in Lesson 3-1: a GET can be triggered by a crawler or a prefetching browser.
+
+**Counting views atomically,** the expression form from Lesson 7-1:
+```python
+db.session.execute(db.update(Lesson).where(Lesson.id == lesson_id).values(views=Lesson.views + 1))
+db.session.commit()
+```
+
+## Part 6: Pagination
+```python
+@app.route("/lessons")
+def lessons():
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(db.select(Lesson).order_by(Lesson.week, Lesson.id),
+                             page=page, per_page=5, error_out=False)
+    return render_template("lessons.html", pagination=pagination)
+```
+```sql
+SELECT * FROM lessons ORDER BY week, id LIMIT 5 OFFSET 0;
+SELECT COUNT(*) FROM lessons;          -- for the page count
+```
+`db.paginate` runs both the `LIMIT/OFFSET` query from Lesson 5-2 and the count, and returns an object with `.items`, `.page`, `.pages`, `.total`, `.has_prev`, `.has_next`, `.prev_num` and `.next_num`. With `error_out=False` an out-of-range page gives an empty list instead of a 404. In the template:
+```html
+{% for l in pagination.items %}<li>{{ l.title }}</li>{% endfor %}
+{% if pagination.has_prev %}<a href="{{ url_for('lessons', page=pagination.prev_num) }}">Previous</a>{% endif %}
+Page {{ pagination.page }} of {{ pagination.pages }}
+{% if pagination.has_next %}<a href="{{ url_for('lessons', page=pagination.next_num) }}">Next</a>{% endif %}
+```
+The ORM saved you the offset arithmetic and the second query, while the SQL stayed exactly as you would have written it.
+
+## Part 7: Testing with an in-memory database
+```python
+import pytest
+from app import create_app
+from extensions import db
+
+@pytest.fixture
+def app():
+    app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://"})
+    with app.app_context():
+        db.create_all()
+        yield app
+
+@pytest.fixture
+def client(app):
+    return app.test_client()
+```
+`"sqlite://"` is an in-memory database that vanishes after the test, so every test starts empty and your real data is never touched. Flask-SQLAlchemy keeps one shared connection for in-memory SQLite so the tables stay visible across requests within a test. If you prefer not to use pytest, write the same thing as a function that builds the app and returns a client, as you did in Lesson 5-5.
+
+## Part 8: Reading older tutorials
+Older Flask-SQLAlchemy code (and many videos) use a style that still works in places but is called **legacy**. Here is a translation table:
+```
+Old (legacy)                               Current
+-----------------------------------------  --------------------------------------------------
+db.Column(db.String(80), unique=True)      mapped_column(String(80), unique=True) with Mapped[str]
+Lesson.query.all()                         db.session.scalars(db.select(Lesson)).all()
+Lesson.query.get(1)                        db.session.get(Lesson, 1)
+Lesson.query.get_or_404(1)                 db.get_or_404(Lesson, 1)
+Lesson.query.filter_by(week=5).first()     db.session.scalars(db.select(Lesson).filter_by(week=5)).first()
+Lesson.query.paginate(page=1)              db.paginate(db.select(Lesson), page=1)
+db.create_all()  (no context)              with app.app_context(): db.create_all()
+```
+- The old `db.Column` style is still accepted, so older models keep working. The newer `Mapped` style adds type checking in your editor.
+- `Model.query` still exists in current versions but is marked legacy, and the 2.0-style `select()` shown in this course works the same way across plain SQLAlchemy and Flask-SQLAlchemy, so you learn one API instead of two.
+- The most common breakage when following an old video is `db.create_all()` run **without an app context**: older versions allowed that, current ones raise `RuntimeError`.
+
+## Recap
+- Flask-SQLAlchemy wires SQLAlchemy into Flask: an engine from config, a request-scoped `db.session`, and helpers like `db.get_or_404` and `db.paginate`.
+- Create `db = SQLAlchemy(model_class=Base)` in its own module, connect it with `db.init_app(app)`, and prefer an app factory so tests can configure the app.
+- Relative SQLite paths live in the `instance` folder. Set `__tablename__` yourself, because the automatic name is singular.
+- `create_all` and `db.session` need an app context and only create missing tables.
+- Catch `IntegrityError`, then `rollback()`, then tell the user. Delete and change data only with POST.
+- Learn the translation from legacy `Model.query` code, and test against `sqlite://`.
+
+===TASKS===
+### Set up and create the tables | guided
+Install Flask-SQLAlchemy and create `extensions.py`, `models.py` (the `Lesson` model), and `app.py` with a `create_app` factory. Add a small script `init_db.py` that calls `db.create_all()` inside an app context. Run it, then find the database file on disk and open it with `python -m sqlite3` or a short script to confirm the `lessons` table exists. Then remove the `app.app_context()` and write down the exact error.
+HINT: Remember `import models` so the model is registered. Look in the `instance` folder, not next to `app.py`.
+EXPECT: The file is `instance/hub.db`, the table `lessons` exists, and without the context you get `RuntimeError: Working outside of application context`.
+SOL:
+```python
+# init_db.py
+from app import app
+from extensions import db
+import models
+
+with app.app_context():
+    db.create_all()
+    print(app.instance_path)
+```
+```python
+# check.py
+import sqlite3
+conn = sqlite3.connect("instance/hub.db")
+print(conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall())
+```
+### List, detail and create | guided
+Write `/lessons` (ordered by week and id), `/lesson/<int:lesson_id>` using `db.get_or_404`, and `/lessons/new` with the create view from Part 5 (validation, duplicate title handled with `IntegrityError` and `rollback`, flash message, redirect). Add a comment above each view with the equivalent SQL. Create a lesson, then try to create the same title again and confirm you see your friendly message and not an error page.
+HINT: Without the `rollback()`, the second failed request would still work, but the next database use in the same request would raise `PendingRollbackError`. Try removing it in a test to see.
+EXPECT: A new lesson redirects with a flash message, the duplicate returns status 400 with the friendly error, and an unknown id gives 404.
+SOL:
+```python
+@app.route("/lessons")
+def lessons():
+    # SELECT * FROM lessons ORDER BY week, id
+    rows = db.session.scalars(db.select(Lesson).order_by(Lesson.week, Lesson.id)).all()
+    return render_template("lessons.html", lessons=rows)
+
+@app.route("/lesson/<int:lesson_id>")
+def lesson(lesson_id):
+    # SELECT * FROM lessons WHERE id = ?  (404 if missing)
+    return render_template("lesson.html", lesson=db.get_or_404(Lesson, lesson_id))
+```
+### POST-only actions | independent
+Add `/lesson/<int:lesson_id>/done` and `/lesson/<int:lesson_id>/delete` as POST-only routes, plus an atomic `views` counter updated with `Lesson.views + 1` every time the detail page is opened. Write tests with the test client: a GET to a delete URL returns 405, deleting an unknown id returns 404, deleting a lesson removes it, marking done changes the flag, and opening the detail page three times gives `views` equal to 3 (check it in the database, not the HTML).
+HINT: Query the database in the test with `db.session.get(Lesson, id)` inside `app.app_context()`. Remember to commit after the counter update.
+EXPECT: All five checks pass, and with `SQLALCHEMY_ECHO` set to `True` the echoed SQL for the counter shows `views=(lessons.views + ?)`, not a read-modify-write.
+SOL:
+```python
+@app.route("/lesson/<int:lesson_id>")
+def lesson(lesson_id):
+    item = db.get_or_404(Lesson, lesson_id)
+    db.session.execute(db.update(Lesson).where(Lesson.id == lesson_id).values(views=Lesson.views + 1))
+    db.session.commit()
+    db.session.refresh(item)
+    return render_template("lesson.html", lesson=item)
+```
+```python
+def test_views(client, app):
+    with app.app_context():
+        db.session.add(Lesson(title="A", week=1)); db.session.commit()
+    for _ in range(3):
+        client.get("/lesson/1")
+    with app.app_context():
+        assert db.session.get(Lesson, 1).views == 3
+```
+### Pagination | independent
+Seed 23 lessons and make `/lessons` paginated with 5 per page using `db.paginate`. Show previous and next links built with `url_for`, and "Page X of Y". Test page 1 (5 items, no previous), page 5 (3 items, no next), page 99 with `error_out=False` (empty list, no crash), and a non-numeric `?page=abc` (falls back to page 1). In a comment, write the two raw SQL statements `db.paginate` replaced.
+HINT: `request.args.get("page", 1, type=int)` falls back to the default for non-numbers.
+EXPECT: 5 pages in total, 3 items on the last page, and no errors for out-of-range or invalid page values.
+SOL:
+```python
+@app.route("/lessons")
+def lessons():
+    page = request.args.get("page", 1, type=int)
+    pagination = db.paginate(db.select(Lesson).order_by(Lesson.week, Lesson.id),
+                             page=page, per_page=5, error_out=False)
+    return render_template("lessons.html", pagination=pagination)
+# SELECT * FROM lessons ORDER BY week, id LIMIT 5 OFFSET (page - 1) * 5;
+# SELECT COUNT(*) FROM lessons;
+```
+### Port Hub v3 lessons and feedback | challenge
+Take the lessons and feedback pages of your Hub v3 and rebuild them on Flask-SQLAlchemy: `Lesson` and `Feedback` models (feedback has `lesson_id`, `rating`, `message`, `created`), an app factory, the list with pagination, the detail page with its feedback newest first, the feedback form with validation and a `CHECK`-like rule in Python plus a `CheckConstraint` in the model, and a delete route for feedback. Write tests with an in-memory database for every route, including constraint failures. Finish with a one-page note listing, for each of the five views, the SQL it replaced and one thing the ORM version hides from you.
+HINT: A table-level constraint is `__table_args__ = (CheckConstraint("rating BETWEEN 1 AND 5", name="ck_feedback_rating"),)`. Give constraints names, because migrations will need them in Lesson 7-5.
+EXPECT: All routes work, a rating of 9 is refused both by your validation and by the database constraint, and your note names at least `LIMIT/OFFSET`, the 404 check and the automatic parameter binding.
+SOL:
+```python
+from datetime import datetime, timezone
+from sqlalchemy import CheckConstraint, ForeignKey, Text, DateTime
+
+class Feedback(db.Model):
+    __tablename__ = "feedback"
+    __table_args__ = (CheckConstraint("rating BETWEEN 1 AND 5", name="ck_feedback_rating"),)
+
+    id:        Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id", ondelete="CASCADE"))
+    rating:    Mapped[int]
+    message:   Mapped[str] = mapped_column(Text)
+    created:   Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+```
+===QUIZ===
+Q: What does `db.session` give you in Flask-SQLAlchemy?
+- A global connection shared by all requests
+- A session scoped to the current request, cleaned up automatically when it ends *
+- A new engine every call
+- A list of models
+WHY: It replaces the hand-written `get_db` and teardown pair from Lesson 5-5.
+Q: Why is `db = SQLAlchemy(model_class=Base)` created in its own module without an app?
+- Flask requires it
+- Models can import `db` without importing `app`, avoiding circular imports, and `init_app` connects it later *
+- It makes queries faster
+- It hides the database
+WHY: This is the extension pattern, and it also lets tests build apps with different configurations.
+Q: Where does `sqlite:///hub.db` create the file in Flask-SQLAlchemy?
+- Next to `app.py`
+- In the `instance` folder *
+- In the system temp folder
+- In memory
+WHY: Relative SQLite paths are resolved against the instance folder, which keeps data away from code.
+Q: What table name does Flask-SQLAlchemy choose for `class Lesson(db.Model)` if you omit `__tablename__`?
+TYPE: lesson
+WHY: It converts the class name to snake case, singular. Set `__tablename__` explicitly to stay consistent.
+Q: What error does `db.create_all()` raise when called without an app context?
+- `SyntaxError`
+- `RuntimeError: Working outside of application context` *
+- `IntegrityError`
+- Nothing
+WHY: The extension needs to know which app's configuration to use, and the context provides it.
+Q: What does `db.get_or_404(Lesson, 5)` do when no such row exists?
+- Returns `None`
+- Aborts the request with a 404 response *
+- Creates the row
+- Raises `KeyError`
+WHY: It replaces the fetch followed by `if row is None: abort(404)`.
+Q: After catching an `IntegrityError` on `db.session.commit()`, what must you call before continuing?
+TYPE: rollback | db.session.rollback()
+WHY: The failed transaction leaves the session unusable until it is rolled back.
+Q: Why is deleting done with a POST route and not a GET?
+- GET cannot reach the database
+- A GET can be triggered by crawlers, prefetching and links, so it must never change data *
+- POST is faster
+- Flask forbids GET deletes
+WHY: GET must be safe (Lesson 3-1). State changes belong to POST, and forms add CSRF protection later.
+Q: What two SQL statements does `db.paginate` replace?
+- INSERT and UPDATE
+- A `LIMIT/OFFSET` query and a `COUNT(*)` query *
+- CREATE and DROP
+- JOIN and GROUP BY
+WHY: It fetches one page of rows and the total, so you can show page numbers.
+Q: An older tutorial uses `Lesson.query.all()`. What is the current-style equivalent?
+- `Lesson.all()`
+- `db.session.scalars(db.select(Lesson)).all()` *
+- `db.query(Lesson)`
+- `session.get(Lesson)`
+WHY: `Model.query` is the legacy interface. The `select()` style works identically with plain SQLAlchemy.
+</script>
+<script type="text/markdown" id="n-7-3">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to describe the difference between a foreign key column and an ORM `relationship`, define one-to-many and many-to-many relationships in both directions, create linked objects by appending to a collection, explain lazy loading and recognise the N+1 problem in ORM code, fix it with `selectinload` and `joinedload` and count the SQL statements to prove it, choose between ORM-level and database-level cascades and predict what a delete does in each, store extra data on a link with an association object, and ask "has this tag" and "has no tag" questions with `any()` and `has()`.
+
+This lesson is Lessons 6-1 to 6-3 again, translated into Python objects. Every relationship comes with the SQL behind it.
+
+## Part 1: Two layers, the column and the relationship
+In SQL a relationship is only a **foreign key column** plus a join when you want to follow it. The ORM adds a second layer on top: a **`relationship()`**, which lets you navigate with a dot.
+```python
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+    id:    Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str]
+    feedback: Mapped[list["Feedback"]] = relationship(back_populates="lesson")
+
+class Feedback(Base):
+    __tablename__ = "feedback"
+    id:        Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
+    rating:    Mapped[int]
+    lesson:    Mapped["Lesson"] = relationship(back_populates="feedback")
+```
+Understand the roles:
+- **`lesson_id` with `ForeignKey("lessons.id")`** is the real database column. It is what the `CREATE TABLE` statement contains and what constrains the data.
+- **`feedback`** (on `Lesson`) and **`lesson`** (on `Feedback`) are **not columns**. They are Python attributes that SQLAlchemy fills in by running queries. `lesson.feedback` is a list of that lesson's feedback objects, and `feedback.lesson` is its parent.
+- **`back_populates`** links the two sides so they stay in sync: when you add feedback to `lesson.feedback`, `feedback.lesson` is set automatically, and the reverse.
+- `Mapped[list["Feedback"]]` is the "many" side. `Mapped["Lesson"]` is the "one" side. The quotes are needed because the class is defined later in the file.
+
+## Part 2: Creating linked objects
+**With the ORM** you never write the foreign key value yourself:
+```python
+lesson = Lesson(title="SQL basics")
+lesson.feedback.append(Feedback(rating=5))
+lesson.feedback.append(Feedback(rating=3))
+session.add(lesson)
+session.commit()
+```
+**The same with raw SQL** (Lesson 6-1), where you carry the parent's id by hand:
+```sql
+INSERT INTO lessons (title) VALUES ('SQL basics');          -- lastrowid = 1
+INSERT INTO feedback (lesson_id, rating) VALUES (1, 5);
+INSERT INTO feedback (lesson_id, rating) VALUES (1, 3);
+```
+Adding the lesson to the session also adds its feedback (this is the "save-update cascade"). At commit SQLAlchemy inserts the parent first, learns its id, and fills `lesson_id` in the children. The ordering problem of Lesson 6-1, parents before children, is solved for you.
+
+Navigating the other way: `feedback.lesson.title`. And you can attach by assigning the object: `Feedback(rating=4, lesson=lesson)`.
+
+## Part 3: Lazy loading and the N+1 problem
+By default a relationship is **lazy**: the related rows are fetched **the first time you touch the attribute**.
+```python
+for lesson in session.scalars(select(Lesson)):
+    print(lesson.title, len(lesson.feedback))
+```
+What really happens, in SQL:
+```sql
+SELECT * FROM lessons;                          -- 1 query for the list
+SELECT * FROM feedback WHERE lesson_id = 1;     -- then one per lesson
+SELECT * FROM feedback WHERE lesson_id = 2;
+...
+```
+With 3 lessons that is **4 queries**, with 1000 lessons it is **1001**. This is exactly the **N+1 problem** from Lesson 6-2, now hidden behind innocent-looking Python. The code reads perfectly and runs slowly, which makes it the classic ORM trap.
+
+Watch it happen by counting statements:
+```python
+from sqlalchemy import event
+
+statements = []
+
+@event.listens_for(engine, "before_cursor_execute")
+def count(conn, cursor, statement, parameters, context, executemany):
+    statements.append(statement)
+```
+Clear the list before a block of code and `len(statements)` afterwards tells you how many queries it caused. Turn this into a habit or a test.
+
+## Part 4: Eager loading, the cure
+You tell the ORM up front to fetch the related rows together with the parents.
+```python
+from sqlalchemy.orm import selectinload, joinedload
+
+lessons = session.scalars(select(Lesson).options(selectinload(Lesson.feedback))).all()
+```
+- **`selectinload`** runs **one extra query** for all children at once:
+```sql
+SELECT * FROM lessons;
+SELECT * FROM feedback WHERE lesson_id IN (1, 2, 3, ...);
+```
+Two queries however many lessons there are. This is usually the best choice for "one-to-many".
+- **`joinedload`** fetches everything in **one** query with a `LEFT OUTER JOIN`:
+```sql
+SELECT lessons.*, feedback.* FROM lessons LEFT OUTER JOIN feedback ON feedback.lesson_id = lessons.id;
+```
+It is best for "many-to-one" (a feedback row with its lesson). For one-to-many collections it repeats each parent once per child, so with `scalars()` you must add `.unique()` to remove the duplicate parent objects.
+
+**Three routes to "list lessons with their feedback count".**
+- Route A, lazy loading and `len(lesson.feedback)`. Outcome: N+1 queries, and every feedback object is loaded just to be counted.
+- Route B, `selectinload`. Outcome: two queries, but still loads every feedback object into memory.
+- Route C, ask SQL for the count (Lesson 6-2): `select(Lesson.title, func.count(Feedback.id)).outerjoin(...).group_by(...)`. Outcome: **one query, no feedback objects**. For a number, let the database count.
+The lesson: eager loading is for when you need the related **objects**. For totals and averages, aggregate in SQL (Lesson 7-4).
+
+## Part 5: What happens when you delete a parent
+This is Lesson 6-1's `ON DELETE` question again, but now there are **two places** the answer can live: the ORM and the database.
+
+**ORM-level cascade.** On the relationship:
+```python
+feedback: Mapped[list["Feedback"]] = relationship(back_populates="lesson",
+                                                  cascade="all, delete-orphan")
+```
+- `"all"` means operations on the parent (add, delete, and so on) are applied to the children too. Deleting a lesson deletes its feedback, **by the ORM loading the children and deleting each one**.
+- `"delete-orphan"` means a child **removed from the collection** (`lesson.feedback.remove(f)`) is deleted, since a child without a parent is meaningless.
+
+**Without any cascade,** deleting a lesson makes SQLAlchemy try to **set the children's `lesson_id` to NULL**. With a `NOT NULL` foreign key that fails: `IntegrityError: NOT NULL constraint failed: feedback.lesson_id`.
+
+**Database-level cascade** (the `ON DELETE CASCADE` of Lesson 6-1):
+```python
+lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id", ondelete="CASCADE"))
+...
+feedback: Mapped[list["Feedback"]] = relationship(back_populates="lesson",
+                                                  cascade="all, delete-orphan",
+                                                  passive_deletes=True)
+```
+`passive_deletes=True` tells the ORM, "do not bother loading and deleting the children, the database will do it." That is a single `DELETE FROM lessons` and far faster for large collections. **It only works if the database actually enforces foreign keys.** SQLite does not unless told, so register the pragma for every connection:
+```python
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+@event.listens_for(Engine, "connect")
+def enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+```
+This is the ORM version of the `get_db()` pragma line from Lesson 5-5. (If you ever switch to PostgreSQL this handler would fail, so guard it with a check on the dialect when you do.)
+
+**Three routes, three outcomes** for deleting a lesson that has two feedback rows:
+- No cascade: `IntegrityError` (the ORM tries to null out `lesson_id`).
+- `cascade="all, delete-orphan"`: the ORM issues `DELETE` for each feedback row, then for the lesson. Works even if SQLite is not enforcing foreign keys.
+- `ondelete="CASCADE"` plus `passive_deletes=True` plus the pragma: one `DELETE` and the database removes the children.
+Pick one deliberately, and write a test that proves it, as you did for the SQL version.
+
+## Part 6: Many-to-many with `secondary`
+For tags (Lesson 6-3), the junction table has no data of its own, so it can be a plain `Table` and the ORM hides it:
+```python
+from sqlalchemy import Table, Column
+
+lesson_tags = Table(
+    "lesson_tags", Base.metadata,
+    Column("lesson_id", ForeignKey("lessons.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id",    ForeignKey("tags.id",    ondelete="CASCADE"), primary_key=True),
+)
+
+class Lesson(Base):
+    ...
+    tags: Mapped[list["Tag"]] = relationship(secondary=lesson_tags, back_populates="lessons")
+
+class Tag(Base):
+    __tablename__ = "tags"
+    id:   Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(30), unique=True)
+    lessons: Mapped[list[Lesson]] = relationship(secondary=lesson_tags, back_populates="tags")
+```
+Using it is just list manipulation:
+```python
+lesson.tags.append(tag)         # INSERT INTO lesson_tags (lesson_id, tag_id) VALUES (?, ?)
+lesson.tags.remove(tag)         # DELETE FROM lesson_tags WHERE lesson_id = ? AND tag_id = ?
+lesson.tags = [tag_a, tag_b]    # replaces the set: deletes and inserts what changed
+```
+The composite primary key stops duplicates, so appending the same tag twice in one session is ignored by the ORM, and across sessions the database raises `IntegrityError`.
+
+**Asking questions across the relationship** uses `any()` (a hidden `EXISTS`, Lesson 6-3):
+```python
+select(Lesson).where(Lesson.tags.any(Tag.name == "sql"))
+```
+```sql
+SELECT * FROM lessons WHERE EXISTS (
+    SELECT 1 FROM lesson_tags JOIN tags ON tags.id = lesson_tags.tag_id
+    WHERE lesson_tags.lesson_id = lessons.id AND tags.name = 'sql');
+```
+- **Has both `sql` and `web`:** chain two conditions, `where(Lesson.tags.any(Tag.name == "sql"), Lesson.tags.any(Tag.name == "web"))`. Each `any()` is its own subquery, so the "one row cannot have two names" trap of Lesson 6-3 does not occur.
+- **Does not have `sql`:** `where(~Lesson.tags.any(Tag.name == "sql"))`. The `~` means NOT and gives `NOT EXISTS`, the correct form.
+- **No tags at all:** `where(~Lesson.tags.any())`.
+- For a many-to-one, use `has()`: `select(Feedback).where(Feedback.lesson.has(Lesson.week == 5))`.
+
+## Part 7: Association objects, when the link has data
+For `progress` (a user's completion of a lesson, with a score and a date) the junction table has its own columns, so it becomes a real model, an **association object**:
+```python
+class Progress(Base):
+    __tablename__ = "progress"
+    user_id:   Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id", ondelete="CASCADE"), primary_key=True)
+    score:     Mapped[Optional[int]]
+
+    user:   Mapped["User"]   = relationship(back_populates="progress")
+    lesson: Mapped["Lesson"] = relationship(back_populates="progress")
+
+class User(Base):
+    ...
+    progress: Mapped[list[Progress]] = relationship(back_populates="user", cascade="all, delete-orphan")
+```
+You create a link by creating a `Progress` object (`Progress(user=u, lesson=l, score=90)`) and read it through `user.progress`, each item exposing `.lesson` and `.score`. It is the same table as in Lesson 6-3, with the same composite primary key.
+
+The upsert from Lesson 6-3 (insert or update) is expressed in the ORM by checking first and changing the object, or by using SQLite's `insert(...).on_conflict_do_update(...)` from `sqlalchemy.dialects.sqlite`. For a single user acting on their own row, the simple version is fine:
+```python
+link = session.get(Progress, (user_id, lesson_id))     # composite key as a tuple
+if link is None:
+    session.add(Progress(user_id=user_id, lesson_id=lesson_id, score=score))
+else:
+    link.score = score
+session.commit()
+```
+Like the "check, then insert" of Lesson 5-3 this has a small race window under heavy concurrency, which the primary key constraint covers (the loser gets an `IntegrityError`).
+
+## Part 8: Common mistakes
+- Looping over `lesson.feedback` for many lessons without eager loading (N+1).
+- Using `joinedload` on a collection and forgetting `.unique()`.
+- Deleting a parent with a `NOT NULL` foreign key and no cascade.
+- Using `passive_deletes=True` while SQLite foreign keys are off, so children are orphaned or the delete fails.
+- Mismatched `back_populates` names, which silently break synchronisation.
+- Loading whole collections to count them instead of asking SQL.
+- Forgetting that `relationship` attributes are not columns, so you cannot filter with `Lesson.feedback == 5`. Use `any()`, `has()` or a join.
+
+## Recap
+- A foreign key is the column, a `relationship` is the Python navigation built on it. `back_populates` keeps both sides in step.
+- Append to a collection to create linked rows, and the ORM orders the inserts and fills the key.
+- Lazy loading causes N+1. Fix it with `selectinload` (collections) or `joinedload` (single parent), or aggregate in SQL when you only need numbers. Count statements to prove it.
+- Cascades live in the ORM (`cascade="all, delete-orphan"`), in the database (`ondelete`) or both with `passive_deletes`. The database version needs the SQLite foreign key pragma.
+- Many-to-many uses `secondary`, extra data uses an association object, and `any()`, `has()` and `~` express exists and not-exists questions.
+
+===TASKS===
+### One-to-many in both directions | guided
+Define `Lesson` and `Feedback` with `back_populates`, create an in-memory database with `echo=True`, and add a lesson with two feedback objects by appending to `lesson.feedback`. Then print `feedback.lesson.title` for each, create a third feedback object with `Feedback(rating=4, lesson=lesson)`, and show that it also appears in `lesson.feedback` before any commit. Compare the three `INSERT` statements in the echo with the raw SQL you would have written, including where `lesson_id` came from.
+HINT: Print `len(lesson.feedback)` before and after creating the third object.
+EXPECT: Three feedback rows, the third visible in the list immediately because `back_populates` keeps both sides in sync, and `lesson_id` filled in by SQLAlchemy after the lesson was inserted first.
+SOL:
+```python
+with Session(engine) as s:
+    lesson = Lesson(title="SQL basics")
+    lesson.feedback.append(Feedback(rating=5))
+    lesson.feedback.append(Feedback(rating=3))
+    s.add(lesson)
+    s.flush()
+    print(len(lesson.feedback))
+    extra = Feedback(rating=4, lesson=lesson)
+    print(len(lesson.feedback))          # 3, before any commit
+    s.commit()
+    print([f.lesson.title for f in lesson.feedback])
+```
+### Catch the N+1 | guided
+Add the statement-counting listener from Part 3. Create 20 lessons with 2 feedback rows each. Count the statements for: (a) looping with lazy loading and printing `len(lesson.feedback)`, (b) the same with `selectinload`, (c) the same with `joinedload(...).unique()`, and (d) a single aggregate query that returns each title with its feedback count. Print the four counts and write one sentence on when you would choose each.
+HINT: Call `session.expire_all()` between experiments so the objects reload, and clear the `statements` list before each one.
+EXPECT: 21, 2, 1 and 1 statements respectively.
+SOL:
+```python
+from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload, joinedload
+
+def measure(label, fn):
+    statements.clear()
+    fn()
+    print(label, len(statements))
+    session.expire_all()
+
+measure("lazy", lambda: [len(l.feedback) for l in session.scalars(select(Lesson))])
+measure("selectin", lambda: [len(l.feedback) for l in
+        session.scalars(select(Lesson).options(selectinload(Lesson.feedback)))])
+measure("joined", lambda: [len(l.feedback) for l in
+        session.scalars(select(Lesson).options(joinedload(Lesson.feedback))).unique()])
+measure("aggregate", lambda: session.execute(
+        select(Lesson.title, func.count(Feedback.id)).select_from(Lesson)
+        .outerjoin(Feedback, Feedback.lesson_id == Lesson.id).group_by(Lesson.id)).all())
+```
+### Three ways to delete a parent | independent
+Build three versions of the models that differ only in delete behaviour: (1) no cascade, (2) `cascade="all, delete-orphan"`, (3) `ondelete="CASCADE"` with `passive_deletes=True` and the SQLite foreign key pragma. For each, add a lesson with two feedback rows, delete the lesson, and print either the error or the number of feedback rows left. Count the statements for versions 2 and 3. Then show that removing a feedback object from `lesson.feedback` deletes it in versions 2 and 3.
+HINT: Define the models inside a function that takes the mode, so each version has its own `Base` and its own engine.
+EXPECT: (1) fails with `NOT NULL constraint failed: feedback.lesson_id`, (2) leaves 0 rows using separate `DELETE`s for each child, (3) leaves 0 rows using a single `DELETE FROM lessons`.
+SOL:
+```python
+@event.listens_for(Engine, "connect")
+def fk_on(conn, record):
+    c = conn.cursor(); c.execute("PRAGMA foreign_keys=ON"); c.close()
+
+def build(mode):
+    class Base(DeclarativeBase): pass
+    class Lesson(Base):
+        __tablename__ = "lessons"
+        id: Mapped[int] = mapped_column(primary_key=True)
+        title: Mapped[str]
+        if mode == "plain":
+            feedback: Mapped[list["Feedback"]] = relationship(back_populates="lesson")
+        elif mode == "orm":
+            feedback: Mapped[list["Feedback"]] = relationship(back_populates="lesson", cascade="all, delete-orphan")
+        else:
+            feedback: Mapped[list["Feedback"]] = relationship(
+                back_populates="lesson", cascade="all, delete-orphan", passive_deletes=True)
+    class Feedback(Base):
+        __tablename__ = "feedback"
+        id: Mapped[int] = mapped_column(primary_key=True)
+        lesson_id: Mapped[int] = mapped_column(
+            ForeignKey("lessons.id", ondelete="CASCADE" if mode == "db" else None))
+        lesson: Mapped[Lesson] = relationship(back_populates="feedback")
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    return engine, Lesson, Feedback
+```
+### Tags with any() | independent
+Build the `Tag` model with the `lesson_tags` secondary table, create four lessons and the tags `sql`, `web` and `beginner` with the same assignments as Lesson 6-3, and write ORM queries for: lessons with `sql`, lessons with both `sql` and `web`, lessons without `sql`, and lessons with no tags. Print the raw SQL of the "without sql" query with `str(stmt)` and confirm it contains `NOT EXISTS`. Then replace one lesson's tags with `lesson.tags = [...]` and look at the `INSERT`/`DELETE` statements in the echo.
+HINT: `~Lesson.tags.any(Tag.name == "sql")` is the negation, and `~Lesson.tags.any()` finds lessons with no tags at all.
+EXPECT: The same four answers as the SQL version (lesson 3 for "both", lessons 1 and 4 for "without sql", lesson 4 for "no tags"), `NOT EXISTS` in the SQL text, and only the changed links touched when tags are replaced.
+SOL:
+```python
+sql_tag = lambda: Lesson.tags.any(Tag.name == "sql")
+web_tag = lambda: Lesson.tags.any(Tag.name == "web")
+print(session.scalars(select(Lesson).where(sql_tag())).all())
+print(session.scalars(select(Lesson).where(sql_tag(), web_tag())).all())
+without_sql = select(Lesson).where(~sql_tag())
+print(session.scalars(without_sql).all())
+print("NOT EXISTS" in str(without_sql))
+print(session.scalars(select(Lesson).where(~Lesson.tags.any())).all())
+```
+### Hub v3 as ORM models | challenge
+Write the complete Hub v3 schema as SQLAlchemy models: `User`, `Lesson`, `Tag` with `lesson_tags`, `Feedback` (nullable `user_id` with `SET NULL`, `lesson_id` with `CASCADE`) and the `Progress` association object. Choose and configure the delete behaviour exactly as in your SQL schema, register the SQLite foreign key listener, and write tests that prove each rule: deleting a user keeps their feedback with `user_id` NULL and deletes their progress; deleting a lesson deletes its feedback, links and progress; deleting a tag keeps lessons; an orphan insert is refused; two links for the same user and lesson are refused. Add a statement-count test showing that the lessons list with tags and feedback counts needs at most 3 queries for 50 lessons.
+HINT: For `SET NULL`, the foreign key is `ForeignKey("users.id", ondelete="SET NULL")` on a nullable column and the relationship uses `passive_deletes=True` so the database does the work. Count statements with the listener from Part 3.
+EXPECT: All rules pass as tests and match the behaviour of your Week 6 SQL schema, and the list query count test passes.
+SOL:
+```python
+class Feedback(Base):
+    __tablename__ = "feedback"
+    id:        Mapped[int] = mapped_column(primary_key=True)
+    user_id:   Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id", ondelete="CASCADE"))
+    rating:    Mapped[int]
+    message:   Mapped[str]
+    user:   Mapped[Optional["User"]] = relationship(back_populates="feedback")
+    lesson: Mapped["Lesson"] = relationship(back_populates="feedback")
+
+class User(Base):
+    __tablename__ = "users"
+    id:    Mapped[int] = mapped_column(primary_key=True)
+    name:  Mapped[str]
+    email: Mapped[str] = mapped_column(unique=True)
+    feedback: Mapped[list[Feedback]] = relationship(back_populates="user", passive_deletes=True)
+    progress: Mapped[list["Progress"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+```
+===QUIZ===
+Q: What is the difference between `Feedback.lesson_id` and `Feedback.lesson`?
+- They are the same thing
+- `lesson_id` is the real foreign key column, `lesson` is a Python relationship that loads the parent object *
+- `lesson` is a column and `lesson_id` is a method
+- `lesson_id` is only for SQLite
+WHY: The column constrains the data. The relationship is navigation built on it.
+Q: What does `back_populates` do?
+- Backs up the table
+- Keeps the two sides of a relationship in sync *
+- Populates the database with test data
+- Creates an index
+WHY: Appending to `lesson.feedback` also sets `feedback.lesson`, and the reverse.
+Q: What is the N+1 problem in ORM code?
+- N+1 columns in a table
+- One query for a list plus one lazy-loading query per row *
+- A join of N tables
+- A failed migration
+WHY: Touching `lesson.feedback` inside a loop runs a query for each lesson.
+Q: Which loader option runs one extra query using `IN (...)` to load all children at once?
+TYPE: selectinload
+WHY: It is usually the best choice for one-to-many collections, giving two queries however many parents there are.
+Q: You only need the number of feedback rows per lesson. What is the best approach?
+- Load every feedback object and call `len`
+- A `GROUP BY` query with `func.count`, so the database counts and no objects are loaded *
+- `joinedload` with `.unique()`
+- A loop with `session.get`
+WHY: Aggregates belong in SQL. Eager loading is for when you need the related objects themselves.
+Q: What happens when you delete a lesson whose feedback has a `NOT NULL lesson_id`, with no cascade configured?
+- The feedback is deleted
+- The ORM tries to set `lesson_id` to NULL and an IntegrityError is raised *
+- Nothing happens
+- The lesson is archived
+WHY: Without a cascade, the default is to detach children by nulling the key, which a NOT NULL column forbids.
+Q: What does `passive_deletes=True` tell the ORM?
+- To skip deleting the parent
+- To let the database's `ON DELETE CASCADE` remove the children instead of loading and deleting them one by one *
+- To ignore foreign keys
+- To delete immediately
+WHY: It saves queries, but only works if the database enforces foreign keys, which SQLite needs a pragma for.
+Q: Which cascade value deletes a child that is removed from its parent's collection?
+TYPE: delete-orphan | all, delete-orphan | cascade="all, delete-orphan"
+WHY: A child without a parent is an orphan, and `delete-orphan` deletes it when it leaves the collection.
+Q: How do you express "lessons that do NOT have the tag sql" with the ORM?
+- `Lesson.tags != "sql"`
+- `where(~Lesson.tags.any(Tag.name == "sql"))` *
+- `where(Tag.name <> "sql")`
+- `Lesson.tags.remove("sql")`
+WHY: `~` negates the `any()` condition, producing `NOT EXISTS`, the correct answer from Lesson 6-3.
+Q: When does a junction table need to become an association object (a model)?
+- Always
+- When the link itself has data, such as a score or a completion date *
+- Only for SQLite
+- When there are more than two tags
+WHY: A plain `secondary` table hides the link. Extra columns need a class you can read and write.
+</script>
+<script type="text/markdown" id="n-7-4">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to build any query from Lessons 5-2, 5-4 and 6-2 with SQLAlchemy's `select()`, choose the right result method (`scalars().all()`, `first()`, `one()`, `one_or_none()`, rows), filter with comparisons, `in_`, `between`, `like`, `and_`, `or_` and `NULL` tests, join and outer join, group and aggregate with `func`, count conditionally with `case`, use `exists` and subqueries, run bulk `update` and `delete` statements, read the SQL a statement produces and prove that its values are bound parameters, and build safe dynamic filters and sorting.
+
+This lesson is a dictionary between two languages. Every ORM statement is shown beside the SQL you already know, so you can move in either direction.
+
+## Part 1: The shape of a statement
+A `select()` is an object you **build** and then **execute**. Building does nothing to the database.
+```python
+from sqlalchemy import select
+
+stmt = select(Lesson).where(Lesson.week >= 5).order_by(Lesson.week, Lesson.id).limit(10)
+rows = session.scalars(stmt).all()
+```
+```sql
+SELECT * FROM lessons WHERE week >= 5 ORDER BY week, id LIMIT 10;
+```
+- Methods chain and each returns a new statement: `.where()`, `.order_by()`, `.limit()`, `.offset()`, `.distinct()`.
+- Several arguments in one `.where(a, b)` are combined with **AND**. Calling `.where()` twice also ANDs.
+- **Look at the SQL any time:** `print(stmt)` shows the generated text, and `stmt.compile().params` shows the bound values. Make this reflex whenever a query surprises you.
+```python
+print(select(Lesson).where(Lesson.week >= 5).limit(2).offset(1))
+# SELECT lessons.id, lessons.title, lessons.week FROM lessons
+# WHERE lessons.week >= :week_1 LIMIT :param_1 OFFSET :param_2
+```
+Notice the `:week_1` markers: your values are **parameters**, never pasted into the text.
+
+## Part 2: Choosing the shape of the result
+The same `select` can give you objects, single columns, or rows of several columns.
+- **Whole objects:** `select(Lesson)` then `session.scalars(stmt)`. You get `Lesson` instances.
+- **Columns:** `select(Lesson.title, Lesson.week)` then `session.execute(stmt)`. You get **rows** accessed as `row.title`, `row.week` (or `dict(row._mapping)` for a dictionary).
+- **One column as a flat list:** `session.scalars(select(Lesson.title)).all()` gives `["Setup", "SQL", ...]`.
+
+Then choose how many results you expect:
+- `.all()` returns a list (possibly empty).
+- `.first()` returns the first or `None`, never an error.
+- `.one()` returns exactly one and **raises** `NoResultFound` if there is none or `MultipleResultsFound` if there are several. Use it when "not exactly one" means a bug.
+- `.one_or_none()` returns one or `None`, and raises if there are several. This is the right choice for lookups by a unique column such as an email.
+- `session.scalar(stmt)` returns the first column of the first row, perfect for counts: `session.scalar(select(func.count()).select_from(Lesson))`.
+- `session.get(Lesson, 5)` is the primary key shortcut.
+
+## Part 3: Filtering, with the SQL beside it
+```
+ORM                                              SQL
+-----------------------------------------------  --------------------------------------
+Lesson.week == 5                                 week = 5
+Lesson.week != 5                                 week <> 5
+Lesson.week.between(4, 6)                        week BETWEEN 4 AND 6
+Lesson.title.in_(["SQL", "Joins"])               title IN ('SQL', 'Joins')
+Lesson.title.not_in(["SQL"])                     title NOT IN ('SQL')
+Lesson.title.like("S%")                          title LIKE 'S%'
+Lesson.title.ilike("s%")                         case-insensitive LIKE
+Lesson.title.contains("QL")                      title LIKE '%' || 'QL' || '%'
+Lesson.title.startswith("Sq")                    title LIKE 'Sq' || '%'
+Lesson.note.is_(None)                            note IS NULL
+Lesson.note.is_not(None)                         note IS NOT NULL
+and_(a, b)   or_(a, b)   not_(a)                 a AND b   a OR b   NOT a
+```
+- Import `and_`, `or_`, `not_` from `sqlalchemy`. You can also use `&`, `|`, `~` but **each side needs its own parentheses**, because Python's operator precedence differs from SQL's: `(Lesson.week > 4) & (Lesson.title == "SQL")`. Forgetting the parentheses is a classic error, so the named functions are safer for beginners.
+- **NULL.** The trap of Lesson 5-2 follows you: `Lesson.note == None` is translated to `IS NULL` (SQLAlchemy is helpful here), but linters complain about `== None`, so write `.is_(None)` and `.is_not(None)`. The deeper trap remains: `Lesson.note != "x"` skips rows where `note` is NULL, exactly as in SQL. Add `or_(Lesson.note.is_(None), Lesson.note != "x")`.
+- **Precedence in `or_` and `and_`** mirrors SQL, so use explicit grouping when mixing them: `and_(or_(a, b), c)`.
+
+## Part 4: Joins and aggregates
+**Inner join.** With a foreign key defined, SQLAlchemy can work out the `ON` clause, but be explicit while you learn:
+```python
+stmt = (select(Lesson.title, Feedback.rating)
+        .join(Feedback, Feedback.lesson_id == Lesson.id)
+        .order_by(Lesson.week))
+```
+```sql
+SELECT lessons.title, feedback.rating FROM lessons
+JOIN feedback ON feedback.lesson_id = lessons.id ORDER BY lessons.week;
+```
+**Left join, with per-lesson statistics (the query of Lesson 6-2):**
+```python
+from sqlalchemy import func
+
+stmt = (select(Lesson.title,
+               func.count(Feedback.id).label("responses"),
+               func.round(func.avg(Feedback.rating), 1).label("average"))
+        .select_from(Lesson)
+        .outerjoin(Feedback, Feedback.lesson_id == Lesson.id)
+        .group_by(Lesson.id)
+        .order_by(Lesson.week))
+for row in session.execute(stmt):
+    print(row.title, row.responses, row.average)
+```
+```sql
+SELECT lessons.title, COUNT(feedback.id) AS responses, ROUND(AVG(feedback.rating), 1) AS average
+FROM lessons LEFT OUTER JOIN feedback ON feedback.lesson_id = lessons.id
+GROUP BY lessons.id ORDER BY lessons.week;
+```
+- `select_from(Lesson)` fixes which table is on the **left**, which matters for `outerjoin`.
+- **`outerjoin` is SQL's `LEFT JOIN`** and has the same rules as Lesson 6-2: use `func.count(Feedback.id)`, not `func.count()`, so that lessons with no feedback show `0`. Conditions on the right table that must not remove lessons belong in the join condition, not in `.where()`.
+- `func` is a generator for any SQL function: `func.count`, `func.avg`, `func.sum`, `func.min`, `func.max`, `func.round`, `func.lower`, `func.date`. `.label("name")` is `AS name`.
+- **`HAVING`:** `.having(func.count(Feedback.id) >= 3)` after `group_by`.
+
+**Conditional counting** (Lesson 5-4's `CASE WHEN`):
+```python
+from sqlalchemy import case
+
+happy = func.sum(case((Feedback.rating >= 4, 1), else_=0)).label("happy")
+```
+```sql
+SUM(CASE WHEN feedback.rating >= 4 THEN 1 ELSE 0 END) AS happy
+```
+
+## Part 5: Exists and subqueries
+```python
+from sqlalchemy import exists
+
+no_feedback = select(Lesson.title).where(~exists().where(Feedback.lesson_id == Lesson.id))
+```
+```sql
+SELECT title FROM lessons WHERE NOT EXISTS (SELECT * FROM feedback WHERE feedback.lesson_id = lessons.id);
+```
+A **scalar subquery** (one value) lets you compare against an aggregate:
+```python
+average = select(func.avg(Feedback.rating)).scalar_subquery()
+above_average = select(Feedback.id).where(Feedback.rating > average)
+```
+```sql
+SELECT id FROM feedback WHERE rating > (SELECT AVG(rating) FROM feedback);
+```
+**Two routes to "lessons without feedback".** Route A is the outer join with `WHERE f.id IS NULL`, Route B is `NOT EXISTS` above. Both return the same rows. `NOT EXISTS` states the intent more directly and handles multiple conditions cleanly, while the join version is the one every SQL reader recognises. Choose the one you can read at a glance in a year.
+
+## Part 6: Bulk update and delete
+Changing objects one at a time loads each into memory. For a rule that applies to many rows, send one statement:
+```python
+from sqlalchemy import update, delete
+
+result = session.execute(update(Lesson).where(Lesson.week >= 6).values(note="coming soon"))
+print(result.rowcount)
+session.execute(delete(Feedback).where(Feedback.rating.is_(None)))
+session.commit()
+```
+```sql
+UPDATE lessons SET note = 'coming soon' WHERE week >= 6;
+DELETE FROM feedback WHERE rating IS NULL;
+```
+Everything from Lesson 5-3 applies: **no `where` means every row**, `rowcount` tells you how many rows changed, and an expression such as `values(views=Lesson.views + 1)` is calculated by the database. Bulk statements bypass the object-level tracking and ORM cascades, so objects already loaded in the session may be stale (call `session.expire_all()` or `refresh` if you need them current), and ORM-level `cascade="all"` does **not** run for a bulk `delete`. Prefer `session.delete(obj)` when you need cascades, and bulk statements for simple housekeeping.
+
+## Part 7: Raw SQL, still available
+When a query is clearer in SQL, such as a report with window functions, use it without guilt:
+```python
+from sqlalchemy import text
+
+rows = session.execute(
+    text("SELECT week, COUNT(*) AS n FROM lessons WHERE week >= :w GROUP BY week"),
+    {"w": 4},
+).all()
+```
+Named parameters (`:w`) are bound, never pasted. The rule from Lesson 5-2 holds forever: **never put user input into the SQL string**. If it is a *value*, bind it. If it is a *column name* (a sort field), pick it from an allowlist.
+
+## Part 8: Proof that values are bound
+Take the attack string from Lesson 5-2 and use it in an ORM filter:
+```python
+bad = "0 OR 1=1"
+stmt = select(Lesson).where(Lesson.week == bad)
+print(len(session.scalars(stmt).all()))     # 0
+print(stmt.compile().params)                # {'week_1': '0 OR 1=1'}
+```
+The attack string is carried as one parameter value, so SQLite compares `week` with the text `'0 OR 1=1'`, which matches nothing. There was no way for the input to change the query's structure. **Using the ORM's expression API makes injection impossible for values.** It becomes possible again only if you build SQL strings yourself with `text(f"...")`, or pass user input as an identifier.
+
+## Part 9: Dynamic filters and sorting
+Search forms need optional filters. Build a list of conditions and apply them once:
+```python
+SORTABLE = {"title": Lesson.title, "week": Lesson.week, "views": Lesson.views}
+
+def search(session, text_query=None, min_week=None, sort="week", descending=False):
+    conditions = []
+    if text_query:
+        conditions.append(Lesson.title.ilike(f"%{text_query}%"))
+    if min_week is not None:
+        conditions.append(Lesson.week >= min_week)
+    column = SORTABLE.get(sort, Lesson.week)
+    order = column.desc() if descending else column.asc()
+    stmt = select(Lesson).where(*conditions).order_by(order, Lesson.id)
+    return session.scalars(stmt).all()
+```
+- `where(*conditions)` with an empty list simply adds no filter.
+- The f-string builds the `LIKE` **pattern**, a value that is then bound, so it is safe. A user typing `%` just matches more rows.
+- The sort field is looked up in a **dictionary of real columns**, an allowlist by construction. An unknown name falls back to a default. This is the ORM form of the allowlist from Lesson 5-2, and there is no string to inject into at all.
+- Add `Lesson.id` as a second sort key so the order of ties is stable, which matters for pagination.
+
+## Part 10: Common mistakes
+- Using `session.execute(select(Lesson))` and expecting objects, then getting one-element rows. Use `session.scalars(...)`.
+- Forgetting parentheses with `&` and `|`.
+- Writing `func.count()` instead of `func.count(Feedback.id)` after an outer join.
+- Filtering the right table in `.where()` after an `outerjoin`, which silently removes the unmatched rows.
+- Calling `.one()` when zero rows is a normal case.
+- Trusting objects after a bulk `update` or `delete` without refreshing them.
+- Putting user input into `text()` with an f-string.
+
+## Recap
+- A `select()` is built with chained methods and executed with the session. Print it to see the SQL and `compile().params` to see the values.
+- `scalars()` returns objects or single columns, `execute()` returns rows. `all`, `first`, `one` and `one_or_none` say how many results you expect.
+- Operators, `in_`, `between`, `like`, `is_(None)`, `and_` and `or_` map directly to SQL. NULL still needs `is_` and care with `!=`.
+- `join`, `outerjoin`, `func`, `group_by`, `having`, `case`, `exists` and scalar subqueries cover everything from Weeks 5 and 6.
+- Bulk `update` and `delete` are single statements with `rowcount`, and they bypass ORM cascades.
+- ORM expressions bind values automatically. Use dictionaries of columns for dynamic sorting.
+
+===TASKS===
+### Translate ten queries | guided
+Create the practice data from Lesson 5-2 as ORM models (a `Feedback` model with `name`, `email`, `rating` nullable, `message` nullable, `created`). For each of the ten queries you wrote in that lesson (all rows, rating at least 4, emails ending `.org`, names between `A` and `C`, top two by rating with ties by name, missing message, distinct ratings, names in a list, an aliased and doubled rating, page two of size two), write the ORM version and assert that it returns the same rows as the raw SQL version run through `text()`.
+HINT: `Feedback.email.like("%.org")`, `select(Feedback.rating).distinct()`, `(Feedback.rating * 2).label("score")`, `.limit(2).offset(2)`.
+EXPECT: Ten assertions pass, and printing two of the statements shows the same SQL structure you wrote by hand.
+SOL:
+```python
+pairs = [
+    (select(Feedback.name, Feedback.rating),
+     "SELECT name, rating FROM feedback"),
+    (select(Feedback.name, Feedback.rating).where(Feedback.rating >= 4),
+     "SELECT name, rating FROM feedback WHERE rating >= 4"),
+    (select(Feedback.name).where(Feedback.email.like("%.org")),
+     "SELECT name FROM feedback WHERE email LIKE '%.org'"),
+    (select(Feedback.name).where(Feedback.name.between("A", "C")),
+     "SELECT name FROM feedback WHERE name BETWEEN 'A' AND 'C'"),
+    (select(Feedback.name, Feedback.rating).order_by(Feedback.rating.desc(), Feedback.name).limit(2),
+     "SELECT name, rating FROM feedback ORDER BY rating DESC, name LIMIT 2"),
+    (select(Feedback.name).where(Feedback.message.is_(None)),
+     "SELECT name FROM feedback WHERE message IS NULL"),
+    (select(Feedback.rating).distinct(),
+     "SELECT DISTINCT rating FROM feedback"),
+    (select(Feedback.name).where(Feedback.name.in_(["Ada", "Eli"])),
+     "SELECT name FROM feedback WHERE name IN ('Ada', 'Eli')"),
+    (select(Feedback.name.label("visitor"), (Feedback.rating * 2).label("score")),
+     "SELECT name AS visitor, rating * 2 AS score FROM feedback"),
+    (select(Feedback.id).order_by(Feedback.id).limit(2).offset(2),
+     "SELECT id FROM feedback ORDER BY id LIMIT 2 OFFSET 2"),
+]
+for stmt, raw in pairs:
+    orm_rows = [tuple(r) for r in session.execute(stmt)]
+    raw_rows = [tuple(r) for r in session.execute(text(raw))]
+    assert sorted(map(str, orm_rows)) == sorted(map(str, raw_rows)), raw
+```
+### NULL and operators | guided
+Run these four ORM filters and predict each row count first: `Feedback.message == None`, `Feedback.message.is_(None)`, `Feedback.message != "Great pace"`, and `or_(Feedback.message.is_(None), Feedback.message != "Great pace")`. Print the SQL of the first and the third. Then write the same combined condition with `|` and **without** parentheses, run it, and describe the error or wrong result you get.
+HINT: With `|` you need `(a) | (b)`. Without the parentheses Python evaluates `a | b` in the wrong order for comparison operators.
+EXPECT: Counts 1, 1, 3 and 4, the first statement prints `IS NULL`, and the unparenthesised version raises an error or returns a nonsensical result.
+SOL:
+```python
+for cond in [Feedback.message == None,
+             Feedback.message.is_(None),
+             Feedback.message != "Great pace",
+             or_(Feedback.message.is_(None), Feedback.message != "Great pace")]:
+    print(len(session.scalars(select(Feedback).where(cond)).all()))
+print(select(Feedback).where(Feedback.message == None))
+try:
+    bad = Feedback.message.is_(None) | Feedback.message != "Great pace"
+    print(bad)
+except Exception as e:
+    print(type(e).__name__, e)
+```
+### Per-lesson statistics | independent
+Using the `Lesson` and `Feedback` models with the Lesson 6-2 data, write `lesson_stats(session, min_responses=0)` returning dictionaries with `title`, `week`, `responses`, `average` (rounded, `None` when unrated), `best` and `happy` (ratings of 4 or more, using `case`), for **every** lesson ordered by week, with a `HAVING` filter on `min_responses`. Write the raw SQL version too and a test asserting both return identical results for `0`, `1` and `3`.
+HINT: `outerjoin` with the explicit condition, `func.count(Feedback.id)`, and `.having(func.count(Feedback.id) >= min_responses)`.
+EXPECT: With `min_responses=3` only the lesson with three or more responses appears, and the zero-response lessons show `responses` equal to 0 when `min_responses=0`.
+SOL:
+```python
+def lesson_stats(session, min_responses=0):
+    happy = func.sum(case((Feedback.rating >= 4, 1), else_=0))
+    stmt = (select(Lesson.title, Lesson.week,
+                   func.count(Feedback.id).label("responses"),
+                   func.round(func.avg(Feedback.rating), 1).label("average"),
+                   func.max(Feedback.rating).label("best"),
+                   happy.label("happy"))
+            .select_from(Lesson)
+            .outerjoin(Feedback, Feedback.lesson_id == Lesson.id)
+            .group_by(Lesson.id)
+            .having(func.count(Feedback.id) >= min_responses)
+            .order_by(Lesson.week))
+    return [dict(r._mapping) for r in session.execute(stmt)]
+```
+### Safe dynamic search | independent
+Implement the `search` function from Part 9 for `Lesson` and add pagination parameters. Test: no filters returns everything, the text filter is case-insensitive, an unknown sort name falls back to the default, descending works, and a hostile `sort` value such as `"title; DROP TABLE lessons"` does nothing harmful. Then demonstrate with `compile().params` that a hostile `text_query` such as `"x' OR '1'='1"` appears only as a bound value, and write a version that is **deliberately unsafe** using `text(f"...")` to show the difference in what the database receives.
+HINT: The dictionary lookup makes the hostile sort name an unknown key. For the unsafe version, put the query text straight into the SQL string.
+EXPECT: All behaviour tests pass, the safe version shows the hostile text as one parameter, and the unsafe version changes the meaning of the query (returns every row).
+SOL:
+```python
+def unsafe_search(session, text_query):
+    sql = text(f"SELECT title FROM lessons WHERE title LIKE '%{text_query}%'")   # DO NOT DO THIS
+    return session.execute(sql).all()
+
+safe = select(Lesson).where(Lesson.title.ilike("%x' OR '1'='1%"))
+print(safe.compile().params)        # one bound value
+print(len(session.scalars(safe).all()), len(unsafe_search(session, "x' OR '1'='1")))
+# safe: 0 rows. unsafe: the quote closes the string, OR '1'='1' is always true: every row.
+```
+### A JSON lessons API | challenge
+Build `/api/lessons` for Hub using the ORM only: query parameters `q` (text), `tags` (comma-separated, lessons must have all), `min_week`, `sort` (with a leading `-` for descending, from an allowlist), `page` and `per_page` (maximum 50). Return JSON with `items` (each with `id`, `title`, `week`, `tags`, `responses`, `average`), `page`, `per_page`, `total`. Use `selectinload` or an aggregate so the endpoint stays under 4 SQL statements regardless of page size (prove it with a statement counter test). Add tests for each parameter, invalid values, hostile values, the empty result, and for the statement count with 5 and with 50 items.
+HINT: Count total with a second `select(func.count())` that uses the **same conditions**. For tags, add one `Lesson.tags.any(Tag.name == name)` per tag.
+EXPECT: Every parameter works alone and combined, bad values fall back or return 400 with a message, and the statement count is the same for 5 and 50 items.
+SOL:
+```python
+@app.route("/api/lessons")
+def api_lessons():
+    conditions = []
+    q = request.args.get("q", "").strip()
+    if q:
+        conditions.append(Lesson.title.ilike(f"%{q}%"))
+    min_week = request.args.get("min_week", type=int)
+    if min_week is not None:
+        conditions.append(Lesson.week >= min_week)
+    for name in [t for t in request.args.get("tags", "").split(",") if t]:
+        conditions.append(Lesson.tags.any(Tag.name == name))
+
+    raw_sort = request.args.get("sort", "week")
+    column = SORTABLE.get(raw_sort.lstrip("-"), Lesson.week)
+    order = column.desc() if raw_sort.startswith("-") else column.asc()
+
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = min(max(request.args.get("per_page", 10, type=int), 1), 50)
+
+    total = db.session.scalar(select(func.count()).select_from(Lesson).where(*conditions))
+    lessons = db.session.scalars(
+        select(Lesson).where(*conditions).options(selectinload(Lesson.tags))
+        .order_by(order, Lesson.id).limit(per_page).offset((page - 1) * per_page)).all()
+    return {"items": [{"id": l.id, "title": l.title, "week": l.week,
+                       "tags": [t.name for t in l.tags]} for l in lessons],
+            "page": page, "per_page": per_page, "total": total}
+```
+===QUIZ===
+Q: What does building `select(Lesson).where(Lesson.week >= 5)` do to the database?
+- Runs the query immediately
+- Nothing: it only builds a statement object, which runs when you execute it *
+- Creates an index
+- Locks the table
+WHY: A statement is a description. Execution happens in `session.scalars()` or `session.execute()`.
+Q: Which call returns model objects instead of rows?
+- `session.execute(select(Lesson))`
+- `session.scalars(select(Lesson))` *
+- `session.get_all(Lesson)`
+- `select(Lesson).rows()`
+WHY: `scalars()` unwraps the first column of each row, which for `select(Lesson)` is the object.
+Q: Which result method raises an error if there are zero results or more than one?
+TYPE: one | .one() | one()
+WHY: `.one()` insists on exactly one. `.first()` and `.one_or_none()` are the gentler choices.
+Q: How do you write `WHERE note IS NULL` with the ORM?
+- `Lesson.note == "NULL"`
+- `Lesson.note.is_(None)` *
+- `Lesson.note = None`
+- `Lesson.note.null()`
+WHY: `.is_(None)` is explicit, and linters prefer it over `== None`, which SQLAlchemy also translates.
+Q: What is required when combining conditions with `&` and `|`?
+- Nothing
+- Parentheses around each condition, because of Python's operator precedence *
+- Semicolons
+- Square brackets
+WHY: Comparison operators bind more loosely than `&` and `|`, so `a | b != c` is parsed wrongly.
+Q: After `outerjoin(Feedback, ...)`, which expression counts feedback correctly, giving 0 for lessons with none?
+- `func.count()`
+- `func.count(Feedback.id)` *
+- `func.count("*")`
+- `func.sum(1)`
+WHY: `count(column)` skips NULLs from the unmatched row. `count()` counts that row as 1.
+Q: What does `~exists().where(Feedback.lesson_id == Lesson.id)` produce?
+- `EXISTS`
+- `NOT EXISTS`, selecting lessons with no feedback *
+- A join
+- A subquery that returns a count
+WHY: `~` negates the condition, which is the NOT EXISTS pattern from Lesson 6-3.
+Q: What does a bulk `delete(Feedback).where(...)` skip compared with `session.delete(obj)`?
+- The WHERE clause
+- ORM-level cascades and updates to objects already loaded in the session *
+- The commit
+- Foreign key checks
+WHY: Bulk statements go straight to the database, so loaded objects may be stale and ORM cascades do not run.
+Q: Why can a hostile string in `.where(Lesson.week == bad)` not change the query?
+- ORM strings are escaped by hand
+- The value is sent as a bound parameter, separate from the SQL text *
+- SQLite ignores quotes
+- SQLAlchemy removes symbols
+WHY: `compile().params` shows the string as one parameter. The structure of the SQL cannot change.
+Q: What is the safe way to let a user pick the sort column?
+- Put the name into `text(f"ORDER BY {name}")`
+- Look the name up in a dictionary of real columns and fall back to a default *
+- Escape quotes
+- Use `order_by(name)` with the raw string
+WHY: The dictionary is an allowlist by construction, so only known columns can ever be used.
+</script>
+<script type="text/markdown" id="n-7-5">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain what Alembic and Flask-Migrate add compared with the hand-written migration runner of Lesson 6-5, set them up for SQLite, run the generate, review, upgrade workflow, read an autogenerated migration critically, know what autogenerate cannot detect (renames above all), write a safe data migration, name constraints so SQLite migrations work, test that your migrations match your models, and combine the whole of Weeks 5 to 7 into **Hub v4**.
+
+In Lesson 7-1 you learned that `create_all` creates only missing tables. In Lesson 6-5 you solved the real problem by hand with numbered SQL files. Alembic automates the tedious part: it **compares your models with the database and writes the migration for you**, which you then review.
+
+## Part 1: Hand-written versus generated migrations
+```
+                       Lesson 6-5 (by hand)              Alembic through Flask-Migrate
+---------------------  --------------------------------  ----------------------------------------
+Where changes live     migrations/001_init.sql ...       migrations/versions/<id>_<message>.py
+Written by             you, in SQL                       generated from model changes, then edited
+Version tracking       PRAGMA user_version = N           table alembic_version holding a revision id
+Order                  filename numbers                  each file names its parent (down_revision)
+Undo                   not supported                     downgrade() function in each file
+Runner                 your migrate() function           flask db upgrade
+```
+The ideas are identical: numbered, ordered, applied once, never edited after being applied anywhere. What you gain is that adding `bio: Mapped[Optional[str]]` to a model and running one command produces the `ALTER TABLE` for you, in a form that works on SQLite **and** PostgreSQL. What you must still do is **read what it wrote**, because it can be wrong, as Part 5 shows.
+
+## Part 2: Setup
+```powershell
+python -m pip install flask-migrate
+```
+```python
+# extensions.py
+from sqlalchemy import MetaData
+from sqlalchemy.orm import DeclarativeBase
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+db = SQLAlchemy(model_class=Base)
+migrate = Migrate(render_as_batch=True)
+```
+```python
+# in create_app(), after db.init_app(app)
+migrate.init_app(app, db)
+```
+Two settings here are not optional for SQLite, and both have a reason:
+- **`render_as_batch=True`.** SQLite's `ALTER TABLE` is very limited (Lesson 6-5): it cannot drop constraints, change a column, or add a constraint. Alembic's **batch mode** works around this by doing the **table rebuild recipe** from Lesson 6-5 for you (create a new table, copy the data, drop the old one, rename). With this option, autogenerated migrations are written using `with op.batch_alter_table(...)`, which also works on other databases.
+- **A naming convention.** To drop or change a constraint you must refer to it **by name**. Unnamed constraints in SQLite have no name to refer to, so batch operations fail on them. The convention gives every constraint a predictable name (`uq_lessons_title`, `pk_lessons`) from the start. Set it **before your first migration**. Retrofitting names later is painful.
+
+## Part 3: The workflow
+```powershell
+flask --app app db init                         # once: creates the migrations/ folder
+flask --app app db migrate -m "initial tables"  # generate a migration from model changes
+flask --app app db upgrade                      # apply it
+```
+- `db init` creates `migrations/` containing `env.py` (Alembic's configuration, which you rarely touch), `alembic.ini` and the `versions/` folder. **Commit this folder to Git.** The migrations are part of your code.
+- `db migrate -m "message"` compares your **models** with the **current database** and writes a new file in `versions/`. It does not change the database.
+- **Open and read the new file.** This step is not optional.
+- `db upgrade` applies every migration that has not run yet and records the new revision in the table `alembic_version`.
+
+A generated file looks like this:
+```python
+revision = "27d51e16f4f8"        # this migration's id
+down_revision = None             # its parent: None means the first one
+
+def upgrade():
+    op.create_table(
+        "lessons",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("title", sa.String(length=120), nullable=False),
+        sa.Column("week", sa.Integer(), nullable=False),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_lessons")),
+        sa.UniqueConstraint("title", name=op.f("uq_lessons_title")),
+    )
+
+def downgrade():
+    op.drop_table("lessons")
+```
+Compare it with the `CREATE TABLE` you would write by hand. It is the same thing in Python, plus `downgrade()`, which undoes it. `down_revision` links the file to the previous one, forming a chain. The chain, not the filenames, defines the order.
+
+Other commands you will use:
+```powershell
+flask --app app db current        # which revision is the database at
+flask --app app db history        # the whole chain
+flask --app app db downgrade      # undo the latest migration (also: downgrade <id>)
+flask --app app db check          # fail if the models differ from the migrations
+flask --app app db stamp head     # record "this database is at the latest" WITHOUT running anything
+```
+`stamp` is how you **adopt an existing database** (for example one built with `create_all`) once its schema genuinely matches your models.
+
+## Part 4: Changing a model
+Add a nullable column to the model:
+```python
+bio: Mapped[Optional[str]] = mapped_column(String(500))
+```
+Run `flask --app app db migrate -m "add bio"` and the generated file contains:
+```python
+def upgrade():
+    with op.batch_alter_table("users", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("bio", sa.String(length=500), nullable=True))
+
+def downgrade():
+    with op.batch_alter_table("users", schema=None) as batch_op:
+        batch_op.drop_column("bio")
+```
+Apply it, undo it with `downgrade`, apply it again, to prove that both directions work. **A migration you have never downgraded is a migration you have never tested.**
+
+**A NOT NULL column on a table that already has rows** is where Lesson 6-5's rule returns. `Mapped[str]` with no default would generate `nullable=False` and fail on existing rows. Give it a `server_default` so the database can fill the existing rows:
+```python
+level: Mapped[str] = mapped_column(String(20), server_default="student")
+```
+
+## Part 5: What autogenerate cannot know
+Autogenerate sees only **differences**, never **intentions**. The famous case is a rename. You change `week` to `week_number` in the model, run `db migrate`, and read:
+```python
+def upgrade():
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("week_number", sa.Integer(), nullable=False))
+        batch_op.drop_column("week")
+```
+To Alembic, a column vanished and another appeared. If you ran this, you would **lose every value of `week`**, and on a table with rows the `NOT NULL` column would fail without a default. The fix is to **edit the migration by hand** to say what you meant:
+```python
+def upgrade():
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.alter_column("week", new_column_name="week_number")
+
+def downgrade():
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.alter_column("week_number", new_column_name="week")
+```
+The data survives. The general rule: **always read the generated migration**, and treat it as a draft. Autogenerate also does not reliably detect changes to some server defaults, and it does not understand your data. For anything it cannot express, write the operations yourself.
+
+You may edit a migration freely **until it has been applied somewhere you care about**. After that, the rule from Lesson 6-5 returns: never edit it, add a new one.
+
+## Part 6: Data migrations
+Sometimes the schema change needs data to move. Say you want a unique, URL-friendly `slug` for every lesson, derived from its title. You cannot add a `NOT NULL UNIQUE` column in one step to a table with rows, so you do it in three steps **inside one migration**:
+```python
+def upgrade():
+    # 1. add the column, allowing NULL for now
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("slug", sa.String(length=140), nullable=True))
+    # 2. fill it for every existing row
+    op.execute("UPDATE lessons SET slug = lower(replace(title, ' ', '-')) WHERE slug IS NULL")
+    # 3. now enforce the rules
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.alter_column("slug", existing_type=sa.String(length=140), nullable=False)
+        batch_op.create_unique_constraint(batch_op.f("uq_lessons_slug"), ["slug"])
+
+def downgrade():
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.drop_constraint(batch_op.f("uq_lessons_slug"), type_="unique")
+        batch_op.drop_column("slug")
+```
+`op.execute` runs raw SQL, so everything you learned in Weeks 5 and 6 is available inside migrations. If two titles would produce the same slug, step 3 fails and the migration stops. That is the correct outcome: you decide how to resolve the duplicates before trying again.
+
+**SQLite and transactions.** Alembic reports `Will assume non-transactional DDL` for SQLite, meaning a migration that fails halfway may leave the database partly changed, unlike the `BEGIN ... COMMIT` runner of Lesson 6-5. So: **back up the database file before every `upgrade` on data you care about** (the backup API from Lesson 6-5), and keep migrations small, one change each. Migrations on PostgreSQL run inside transactions, one more reason a server database suits a production site.
+
+## Part 7: When the chain forks
+If you and a teammate each create a migration from the same parent, the chain has **two heads** and `db upgrade` complains. `flask --app app db heads` lists them and `flask --app app db merge -m "merge" <id1> <id2>` creates a merge migration. Working alone you will rarely see it. Pull and apply your teammates' migrations **before** generating your own, and the problem mostly disappears.
+
+## Part 8: Testing your migrations
+Two tests catch most migration disasters.
+```python
+import tempfile
+from pathlib import Path
+from app import create_app
+
+def make_app():
+    path = Path(tempfile.mkdtemp()) / "t.db"
+    return create_app({"SQLALCHEMY_DATABASE_URI": f"sqlite:///{path}", "TESTING": True})
+
+def test_migrations_apply_from_scratch():
+    app = make_app()
+    result = app.test_cli_runner().invoke(args=["db", "upgrade"])
+    assert result.exit_code == 0, result.output
+
+def test_models_match_migrations():
+    app = make_app()
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["db", "upgrade"]).exit_code == 0
+    assert runner.invoke(args=["db", "check"]).exit_code == 0     # no drift
+```
+The first proves a **brand new database** can be built from the migrations alone. The second proves you did not change a model and forget to generate its migration: `db check` fails when the models differ from what the migrations produce. Run both in your test suite. (For ordinary route tests, keep using an in-memory database with `create_all`, which is faster.)
+
+## Part 9: Project, Hub v4
+Rebuild Hub on Flask-SQLAlchemy and Flask-Migrate, finishing the work of Weeks 5 to 7. Requirements:
+- **Structure:** an app factory, `extensions.py` (db, naming convention, migrate), `models.py` with `User`, `Lesson`, `Tag` (with `lesson_tags`), `Feedback` and `Progress`, a `config.py`, blueprints are left for Week 8.
+- **Migrations:** `initial schema`, then one migration that adds a column to an existing table, then one **data migration** (for example `slug`), all reviewed by hand, each downgraded and upgraded again during development.
+- **Features:** everything from Hub v3 (lessons with tags, counts and averages, filtering by tags, feedback with reviewers, progress with upsert, the debug-only stand-in login), now using ORM queries, `selectinload` where objects are needed and aggregate queries where numbers are needed.
+- **Raw SQL where it is better:** one report endpoint (for example feedback per week) written with `text()` and bound parameters, with a comment explaining why.
+- **Quality:** route tests on an in-memory database, the two migration tests above, a statement-count test for the lessons page, tests for every delete rule, and a short `README.md` listing the commands to set up (`pip install`, `flask --app app db upgrade`, `flask --app app seed`, `flask --app app run`).
+
+Build in this order: extensions and models, initial migration, seed, lessons pages, tags, feedback, progress, the two extra migrations, the report, tests. Commit after each step, with the generated migration files in the same commit as the model change that caused them.
+
+## Part 10: Common mistakes
+- Not setting `render_as_batch=True` on SQLite, so later migrations fail.
+- Forgetting the naming convention before the first migration.
+- Not reading the generated file, and so shipping a drop-and-add instead of a rename.
+- Adding a `NOT NULL` column without a `server_default` to a table with rows.
+- Editing a migration that has already been applied.
+- Changing a model and forgetting `db migrate` (catch it with `db check`).
+- Forgetting to import a model, so autogenerate does not see it.
+- Running `upgrade` on important data without a backup.
+- Deleting the `migrations` folder or the database to "fix" an error, instead of repairing the chain.
+
+## Recap
+- Alembic (through Flask-Migrate) generates migrations by comparing models with the database, tracks the version in `alembic_version`, and gives every migration an `upgrade` and a `downgrade`.
+- On SQLite use `render_as_batch=True` and a constraint naming convention from the start.
+- The workflow is `db migrate`, read and edit the file, `db upgrade`. Test downgrades too.
+- Autogenerate cannot detect renames or intent. Edit migrations to preserve data, and use three-step migrations (add nullable, fill, enforce) for new required columns.
+- Back up before upgrading, because SQLite DDL is not transactional here. Test that migrations apply from scratch and that `db check` finds no drift.
+
+===TASKS===
+### Set up and generate the first migration | guided
+Install Flask-Migrate. Add the naming convention, `render_as_batch=True`, a `Lesson` model (`id`, unique `title`, `week`) and `migrate.init_app`. Run `db init`, `db migrate -m "initial"`, open the generated file and identify the primary key and unique constraint names, then `db upgrade`. Inspect the database: list the tables and read the `alembic_version` table. Write down how the generated `upgrade()` differs from the `CREATE TABLE` you would write by hand.
+HINT: Set the naming convention before generating anything. The database is in the `instance` folder.
+EXPECT: Tables `lessons` and `alembic_version`, constraints named `pk_lessons` and `uq_lessons_title`, one row in `alembic_version` holding the revision id from the file name.
+SOL:
+```python
+import sqlite3
+conn = sqlite3.connect("instance/hub.db")
+print(conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall())
+print(conn.execute("SELECT * FROM alembic_version").fetchall())
+print(conn.execute("SELECT sql FROM sqlite_master WHERE name = 'lessons'").fetchone()[0])
+```
+### Add a column and prove both directions | guided
+Add `note: Mapped[Optional[str]]` to the model, generate and read the migration, upgrade, then `db downgrade`, check that the column is gone, and upgrade again. Next add `level: Mapped[str]` with **no** default to a table that already has rows, generate and upgrade, and record what happens. Then fix it with `server_default` in the model, regenerate (delete the failed migration file first), and upgrade successfully.
+HINT: Insert a few rows before the `level` experiment. The failing message is the one from Lesson 6-5 about a NOT NULL column.
+EXPECT: The nullable column adds and removes cleanly. The `NOT NULL` column without a default fails on existing rows (`NOT NULL constraint failed`), and works with `server_default="student"`.
+SOL:
+```python
+note: Mapped[Optional[str]] = mapped_column(String(200))
+level: Mapped[str] = mapped_column(String(20), server_default="student")
+```
+### The rename trap | independent
+Insert three lessons. Rename the model attribute `week` to `week_number` and run `db migrate`. Read the generated file and write down exactly what it would do to your data. **Do not apply it.** Delete it, edit the model again, regenerate, and replace the body with `batch_op.alter_column("week", new_column_name="week_number")` plus a matching downgrade. Apply it, confirm all three values survived, then downgrade and confirm they are still there.
+HINT: Name the new migration "rename week" so it is easy to find. Query the table before and after each step.
+EXPECT: The generated file adds `week_number` and drops `week`. The hand-edited version keeps all three values in both directions.
+SOL:
+```python
+def upgrade():
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.alter_column("week", new_column_name="week_number")
+
+def downgrade():
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.alter_column("week_number", new_column_name="week")
+```
+### A data migration | independent
+Add a unique, required `slug` column to `Lesson`. Generate the migration, then rewrite `upgrade()` into the three steps of Part 6 (add nullable, `UPDATE` to fill from the title, enforce `NOT NULL` and uniqueness) with a matching `downgrade()`. Test with three existing lessons, including two titles that would produce the **same** slug, and show that the migration fails rather than silently corrupting data. Then decide a rule to make slugs unique (for example append the id) and make the migration succeed.
+HINT: `lower(replace(title, ' ', '-'))` builds a slug. For uniqueness, `lower(replace(title, ' ', '-')) || '-' || id` always differs.
+EXPECT: Distinct titles migrate cleanly. Colliding slugs make step 3 fail with a UNIQUE error and leave you needing the fix, and the id-suffixed version succeeds.
+SOL:
+```python
+def upgrade():
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("slug", sa.String(length=140), nullable=True))
+    op.execute("UPDATE lessons SET slug = lower(replace(title, ' ', '-')) || '-' || id WHERE slug IS NULL")
+    with op.batch_alter_table("lessons", schema=None) as batch_op:
+        batch_op.alter_column("slug", existing_type=sa.String(length=140), nullable=False)
+        batch_op.create_unique_constraint(batch_op.f("uq_lessons_slug"), ["slug"])
+```
+### Hub v4 | challenge
+Build Hub v4 as described in Part 9, with all three migrations, the report endpoint written with `text()`, a README, and the test suite including the two migration tests and a statement-count test. When it works, write a comparison for yourself: for each of ORM, Core and raw SQL, one place in Hub v4 where it was the best tool and why.
+HINT: Test migrations with `app.test_cli_runner().invoke(args=["db", "upgrade"])`, and route tests with an in-memory database and `db.create_all()`. Put the SQLite foreign key listener in `extensions.py`.
+EXPECT: `db upgrade` builds a fresh database, `db check` reports no drift, all route tests pass, the lessons page needs no more queries for 50 lessons than for 5, and your comparison names at least one aggregate query, one relationship traversal and the report.
+SOL:
+```python
+@app.route("/api/report/week")
+def report_week():
+    rows = db.session.execute(
+        text("""SELECT l.week, COUNT(f.id) AS responses, ROUND(AVG(f.rating), 1) AS average
+                FROM lessons AS l LEFT JOIN feedback AS f ON f.lesson_id = l.id
+                WHERE l.week >= :first GROUP BY l.week ORDER BY l.week"""),
+        {"first": request.args.get("first", 1, type=int)},
+    ).all()
+    return [dict(r._mapping) for r in rows]
+# Raw SQL here: a reporting query reads best as SQL, and :first is a bound parameter.
+```
+===QUIZ===
+Q: What does `flask db migrate -m "message"` do?
+- Applies the migrations to the database
+- Compares the models with the database and writes a new migration file, without changing the database *
+- Deletes the old migrations
+- Creates the tables with create_all
+WHY: `migrate` generates a draft file. `upgrade` is what applies it.
+Q: Where does Alembic record which migrations have been applied?
+- In `PRAGMA user_version`
+- In a table called `alembic_version` *
+- In the `migrations` folder
+- In Git
+WHY: The table holds the current revision id, which is how `upgrade` knows what is left to run.
+Q: Why must SQLite projects set `render_as_batch=True`?
+- It makes migrations faster
+- SQLite's ALTER TABLE is limited, and batch mode rebuilds the table to work around it *
+- It enables foreign keys
+- Flask requires it
+WHY: Batch mode performs the table rebuild recipe from Lesson 6-5 automatically.
+Q: Why give constraints a naming convention before the first migration?
+- Names make tables smaller
+- Dropping or changing a constraint needs a name, and unnamed SQLite constraints have none to refer to *
+- SQLAlchemy refuses to run otherwise
+- It is required by PostgreSQL only
+WHY: Batch operations refer to constraints by name. Retrofitting names later is painful.
+Q: You rename a model attribute and run `db migrate`. What does the generated migration do?
+- A rename that keeps the data
+- Adds a new column and drops the old one, losing the data, because autogenerate cannot detect intent *
+- Nothing
+- Raises an error
+WHY: Alembic sees a removed column and an added column. You must edit the file to use `alter_column(new_column_name=...)`.
+Q: What is the safe way to add a required, unique column to a table that already has rows?
+- Add it as NOT NULL UNIQUE in one step
+- Add it nullable, fill it with an UPDATE, then enforce NOT NULL and UNIQUE *
+- Delete the table and recreate it
+- Use `create_all`
+WHY: Existing rows need values before the constraints can hold. Three steps in one migration do that.
+Q: Which command fails when your models differ from what your migrations produce?
+TYPE: flask db check | db check
+WHY: It detects drift, such as a model change for which you forgot to generate a migration.
+Q: Alembic reports that SQLite will "assume non-transactional DDL". What should you do before `upgrade` on important data?
+- Nothing
+- Back up the database file *
+- Delete the migrations
+- Run it twice
+WHY: A failed migration may leave a partly changed database, so a backup is your safety net.
+Q: You have a database created with `create_all` whose schema already matches your models. How do you tell Alembic it is up to date without running anything?
+TYPE: flask db stamp head | db stamp head | stamp head
+WHY: `stamp` records a revision in `alembic_version` without executing any migration.
+Q: When may you freely edit an existing migration file?
+- Anytime
+- Only before it has been applied anywhere you care about *
+- Never, even when drafting
+- Only after downgrade
+WHY: Once other databases have run it, editing it makes copies diverge. Add a new migration instead.
+</script>
 <script>
 const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
@@ -9997,7 +11962,12 @@ q:[['What does <code>{% extends "base.html" %}</code> do?',['Makes the page reus
 {"id": "6-2", "t": "Joins", "s": "A join matches rows across tables with an ON condition. INNER JOIN keeps only matches, LEFT JOIN keeps every left row with NULLs where nothing matches. Use COUNT(right.id) for zero counts and put right-table conditions in ON.", "tm": [["INNER JOIN", "Keeps only rows that match on both sides."], ["LEFT JOIN", "Keeps all left rows, filling NULL when there is no match."], ["Alias", "A short name for a table, used to qualify columns."], ["N+1 problem", "One query for a list plus one per row, instead of a join."]], "w": 6, "v": "nv62", "nv": 1, "d": "", "c": "", "tk": [], "q": []},
 {"id": "6-3", "t": "Many-to-many relationships", "s": "A many-to-many relationship needs a junction table with two foreign keys and a composite primary key. Query through it with two joins, collapse with GROUP_CONCAT, and use HAVING COUNT(DISTINCT) for “has both” and NOT EXISTS for “has none”.", "tm": [["Junction table", "A table whose rows record which rows of two tables are linked."], ["Composite primary key", "A key made of several columns, unique as a pair."], ["Upsert", "Insert, or update if the key already exists."], ["EXISTS", "True when a subquery returns at least one row."]], "w": 6, "v": "nv63", "nv": 1, "d": "", "c": "", "tk": [], "q": []},
 {"id": "6-4", "t": "Indexes and query plans", "s": "An index is a sorted B-tree that lets the database jump to rows instead of scanning the table. EXPLAIN QUERY PLAN shows SCAN or SEARCH. Indexes speed reads and slow writes, composite indexes follow the leftmost-prefix rule, and functions on a column defeat them.", "tm": [["Index", "A sorted structure that speeds up finding rows."], ["Full table scan", "Reading every row to test the condition."], ["EXPLAIN QUERY PLAN", "Shows how SQLite will run a query."], ["Leftmost prefix", "A composite index helps only if its first column is used."]], "w": 6, "v": "nv64", "nv": 1, "d": "", "c": "", "tk": [], "q": []},
-{"id": "6-5", "t": "Schema design, migrations and Hub v3", "s": "Design from the description: nouns become tables and verbs become relationships. Evolve a live database with numbered migrations tracked in <code>PRAGMA user_version</code>, use the table-rebuild recipe when ALTER cannot do the job, back up first, and test migrations.", "tm": [["Migration", "A numbered script that moves a database to the next schema version."], ["user_version", "A SQLite integer used to record the schema version."], ["Table rebuild", "Create new, copy, drop old, rename, recreate indexes."], ["Backup API", "Makes a consistent copy of a database in use."]], "w": 6, "v": "nv65", "nv": 1, "d": "", "c": "", "tk": [], "q": []}
+{"id": "6-5", "t": "Schema design, migrations and Hub v3", "s": "Design from the description: nouns become tables and verbs become relationships. Evolve a live database with numbered migrations tracked in <code>PRAGMA user_version</code>, use the table-rebuild recipe when ALTER cannot do the job, back up first, and test migrations.", "tm": [["Migration", "A numbered script that moves a database to the next schema version."], ["user_version", "A SQLite integer used to record the schema version."], ["Table rebuild", "Create new, copy, drop old, rename, recreate indexes."], ["Backup API", "Makes a consistent copy of a database in use."]], "w": 6, "v": "nv65", "nv": 1, "d": "", "c": "", "tk": [], "q": []},
+{"id": "7-1", "t": "SQLAlchemy ORM fundamentals", "v": "RUUmEOooKVo", "s": "An ORM maps classes to tables and rows to objects. Create one engine, define models with <code>Mapped</code> and <code>mapped_column</code>, and use a Session as a unit of work: add, commit, query with <code>select</code>, and drop to <code>text()</code> whenever raw SQL is clearer.", "tm": [["ORM", "Maps classes to tables and rows to objects, generating the SQL."], ["Session", "A workspace that tracks objects and writes them in one transaction."], ["Identity map", "One Python object per database row within a session."], ["Bound parameter", "A value sent separately from the SQL text."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
+{"id": "7-2", "t": "Flask-SQLAlchemy", "v": "RUUmEOooKVo", "s": "Flask-SQLAlchemy wires SQLAlchemy into Flask: an engine from config, a request-scoped <code>db.session</code>, and helpers like <code>db.get_or_404</code> and <code>db.paginate</code>. Older tutorials use <code>Model.query</code>, which is now legacy.", "tm": [["db.session", "A session scoped to the current request."], ["init_app", "Connects an extension object to an app created later."], ["Instance folder", "Where relative SQLite paths are stored."], ["Legacy Model.query", "The older query interface replaced by select()."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
+{"id": "7-3", "t": "Relationships in the ORM", "v": "nv73", "nv": 1, "s": "A foreign key is the column, a relationship is the Python navigation built on it. Lazy loading causes N+1 queries, which selectinload or an aggregate query fixes. Cascades can live in the ORM, the database, or both.", "tm": [["relationship", "A Python attribute that loads related rows."], ["N+1 problem", "One query for a list plus one lazy query per row."], ["selectinload", "Loads all children with one extra IN query."], ["Association object", "A model for a junction table whose rows carry data."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
+{"id": "7-4", "t": "Querying with the ORM", "v": "nv74", "nv": 1, "s": "A select() is built with chained methods and executed by the session. Operators, joins, func, group_by, case and exists map directly to SQL, ORM expressions bind values automatically, and bulk update and delete are single statements.", "tm": [["select()", "An object describing a query, executed by the session."], ["scalars()", "Unwraps the first column of each row, often model objects."], ["func", "Generates SQL functions such as count and avg."], ["Bulk update", "One UPDATE statement that bypasses ORM object tracking."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
+{"id": "7-5", "t": "Migrations with Flask-Migrate and Hub v4", "v": "nv75", "nv": 1, "s": "Alembic, through Flask-Migrate, generates migrations by comparing models with the database. On SQLite use batch mode and named constraints, always read the generated file, and hand-edit renames and data moves that autogenerate cannot understand.", "tm": [["Alembic", "The migration tool behind Flask-Migrate."], ["Batch mode", "Rebuilds tables so SQLite can alter them."], ["alembic_version", "The table that records the current revision."], ["db check", "Fails when models differ from the migrations."]], "w": 7, "d": "", "c": "", "tk": [], "q": []}
 ];
 const K='pythonhub-v1';let S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
 S=Object.assign({done:{},quiz:{},score:{},watched:{},time:{},log:{},days:{},theme:'dark',last:null},S||{});
