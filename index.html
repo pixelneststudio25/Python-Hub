@@ -11839,6 +11839,1781 @@ Q: When may you freely edit an existing migration file?
 - Only after downgrade
 WHY: Once other databases have run it, editing it makes copies diverge. Add a new migration instead.
 </script>
+<script type="text/markdown" id="n-8-1">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain why one `app.py` stops scaling, organise a Flask project as a package with an application factory, split it into blueprints, predict how blueprints change endpoint names and `url_for` calls, know where templates and static files are looked up, attach behaviour to one blueprint or to the whole app (`before_request`, error handlers, context processors), diagnose `BuildError`, `TemplateNotFound` and circular import errors, and test a blueprint-based app.
+
+Weeks 3 to 7 added features to one growing app. Week 8 adds login, which touches every page. Before adding it, the project needs a structure that can hold it. This lesson provides the structure.
+
+## Part 1: When one file stops working
+Hub now has pages for lessons, tags, feedback, progress and reports, plus models, forms, migrations and soon authentication. In one `app.py` that means:
+- **Hundreds of lines** where you scroll to find anything.
+- **Name clashes**: two features both want a view called `index` or `list`, which Flask forbids (Lesson 3-3).
+- **Everything depends on everything**, so a change in one feature breaks another.
+- **No way to share work** between people, since everyone edits the same file.
+- **Awkward tests**, because the whole app is one global object created on import.
+
+The remedy is the principle from Lesson 4-5, one responsibility per module, applied at the scale of **features**: each feature gets its own folder with its own routes and templates, and a small amount of glue assembles them. Flask's tool for this is the **blueprint**.
+
+## Part 2: What a blueprint is
+A **blueprint** is a bundle of routes, templates and handlers defined **without an app**. You describe a feature on its own, then **register** it on an app, which activates it. Think of it as a plug-in module for an app.
+```python
+# hub/lessons/routes.py
+from flask import Blueprint, render_template
+from ..extensions import db
+from ..models import Lesson
+
+bp = Blueprint("lessons", __name__, url_prefix="/lessons")
+
+@bp.route("/")
+def index():
+    rows = db.session.scalars(db.select(Lesson).order_by(Lesson.week, Lesson.id)).all()
+    return render_template("lessons/index.html", lessons=rows)
+
+@bp.route("/<int:lesson_id>")
+def detail(lesson_id):
+    return render_template("lessons/detail.html", lesson=db.get_or_404(Lesson, lesson_id))
+```
+Read the new pieces:
+- `Blueprint("lessons", __name__, url_prefix="/lessons")` takes a **name** (which becomes part of every endpoint, see Part 4), the module name (so Flask knows where its files are), and an optional **URL prefix** prepended to every route. The route `"/"` above is served at `/lessons/`, and `"/<int:lesson_id>"` at `/lessons/3`.
+- `@bp.route` replaces `@app.route`. Everything else you know (converters, `methods`, `@bp.get`, `@bp.post`) works the same.
+- Note the relative imports with dots: `..extensions` means "the parent package's `extensions` module". You will see why in Part 3.
+
+## Part 3: The application factory and the package layout
+```
+hub/                         project folder
+  config.py
+  hub/                       the Python package
+    __init__.py              create_app()
+    extensions.py            db, migrate (and later login_manager, csrf)
+    models.py
+    main/
+      __init__.py
+      routes.py              bp = Blueprint("main", ...)
+    lessons/
+      __init__.py
+      routes.py              bp = Blueprint("lessons", ...)
+    templates/
+      base.html
+      main/home.html
+      lessons/index.html
+      lessons/detail.html
+    static/
+  migrations/
+  tests/
+```
+```python
+# hub/__init__.py
+from flask import Flask
+from .extensions import db, migrate
+
+def create_app(config=None):
+    app = Flask(__name__)
+    app.config.from_object("config.Config")
+    if config:
+        app.config.update(config)
+
+    db.init_app(app)
+    migrate.init_app(app, db)
+
+    from .main.routes import bp as main_bp
+    from .lessons.routes import bp as lessons_bp
+    app.register_blueprint(main_bp)
+    app.register_blueprint(lessons_bp)
+    return app
+```
+- **`create_app`** is the factory you met in Lesson 7-2. It builds a new app each time it is called, so tests can build one with an in-memory database and a development server another with the real one. `flask --app hub run` finds it automatically.
+- `app.config.from_object("config.Config")` loads defaults, and the optional `config` argument overrides them for tests.
+- **`register_blueprint`** activates a blueprint. Forget it and its URLs simply return 404.
+- The blueprint imports happen **inside** the function. Blueprint modules import `db` and the models, and models import `db` from `extensions`. If `extensions.py` held `create_app` or imported the blueprints at the top, two modules would import each other, a **circular import** that fails with `ImportError: cannot import name ... (most likely due to a circular import)`. Keeping shared objects (`db`, `login_manager`, ...) in `extensions.py`, with no imports of your own modules, breaks the cycle. Remember this rule: **extensions never import the app or the blueprints**.
+- A folder becomes a Python package with an `__init__.py` file. It may be empty.
+
+## Part 4: Endpoint names change, and so does url_for
+Without blueprints the endpoint of a view is its function name (`lesson`). With blueprints it is **`blueprint_name.function_name`**.
+```
+Before                    After
+-----------------------   ---------------------------
+url_for("lessons")        url_for("lessons.index")
+url_for("lesson", ...)    url_for("lessons.detail", lesson_id=3)
+url_for("home")           url_for("main.home")
+```
+That is also how two features can both have a view called `index`: `lessons.index` and `tags.index` are different endpoints.
+- **Inside a blueprint** you may use a leading dot: `url_for(".detail", lesson_id=3)` means "the `detail` endpoint of the blueprint I am in". It keeps links working if you rename the blueprint.
+- **In templates** use the full name `url_for("lessons.detail", ...)`, since a template can be rendered from anywhere.
+- `request.endpoint` is now `"lessons.detail"`, so the active-link code of Lesson 3-5 changes to `request.endpoint == "lessons.index"`, or better `request.blueprint == "lessons"` to highlight the whole section.
+- **Static files** keep the endpoint `static` (the app's). A blueprint may have its own `static_folder`, served as `lessons.static`, but one shared static folder is simpler for a project this size.
+- `flask --app hub routes` now lists names like `lessons.detail`, a quick way to check every endpoint.
+
+**The error you will meet first:** changing to blueprints and forgetting to update an old `url_for("login")` gives
+```
+werkzeug.routing.exceptions.BuildError: Could not build url for endpoint 'login'. Did you mean 'auth.login' instead?
+```
+The message even suggests the fix. Search your templates and views for every old name.
+
+## Part 5: Where templates and static files live
+Flask looks for a template in the **app's** `templates` folder first, then in the folders of registered blueprints. All the folders are merged into one namespace, so two files called `index.html` would **collide** and the first found wins, silently showing the wrong page.
+
+**Two routes to organising templates.**
+- Route A, each blueprint has its own `templates` folder (`Blueprint(..., template_folder="templates")`) with plain names like `index.html`. Outcome: features are self-contained, but `lessons/templates/index.html` and `tags/templates/index.html` collide.
+- Route B, **one `templates` folder with a subfolder per blueprint**: `templates/lessons/index.html`, referred to as `render_template("lessons/index.html")`. Outcome: no collisions, and one place to look for every page. This is the convention used in this course, and the layout shown above.
+
+A shared `base.html` at the top level of `templates` is extended by every feature page with `{% extends "base.html" %}`.
+
+## Part 6: Behaviour for one blueprint or for the whole app
+Handlers come in two scopes, and mixing them up causes bewildering bugs.
+```python
+@bp.before_request            # runs only for requests handled by THIS blueprint
+def load_something(): ...
+
+@bp.before_app_request        # runs for EVERY request, whichever blueprint handles it
+def load_current_user(): ...
+
+@bp.errorhandler(404)         # only 404s raised inside this blueprint's views
+def lessons_404(error): ...
+
+@bp.app_errorhandler(404)     # 404s for the whole app, including unknown URLs
+def not_found(error):
+    return render_template("errors/404.html"), 404
+
+@bp.app_context_processor     # template variables for every page in the app
+def inject_theme():
+    return {"theme": "dark"}
+```
+- A plain `errorhandler(404)` on a blueprint does **not** catch a request for a URL that matches no route at all, because no blueprint handled it. For site-wide error pages use `app_errorhandler`, or register the handler on the app inside `create_app`.
+- Use `before_app_request` for things that must happen on every request, such as loading the logged-in user (Lesson 8-3). Use `before_request` for things that apply to one feature, such as requiring an admin for every route of the `admin` blueprint.
+
+## Part 7: Testing a blueprint app
+```python
+# tests/conftest.py
+import pytest
+from hub import create_app
+from hub.extensions import db
+
+@pytest.fixture
+def app():
+    app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://",
+                      "SECRET_KEY": "test"})
+    with app.app_context():
+        db.create_all()
+        yield app
+
+@pytest.fixture
+def client(app):
+    return app.test_client()
+```
+The factory pays off here: every test gets a **fresh app and an empty database**. A useful structural test is to list every endpoint and check that all `url_for` calls in your templates resolve, by requesting each page and asserting no 500.
+```python
+def test_all_get_routes_respond(client):
+    for path in ["/", "/lessons/", "/lessons/1"]:
+        assert client.get(path).status_code in (200, 404)
+```
+
+## Part 8: Common mistakes
+- Forgetting `register_blueprint`, so URLs 404.
+- Old `url_for("name")` calls that need `"blueprint.name"` (`BuildError`).
+- Circular imports from putting shared objects in the same module as the factory.
+- Two templates with the same name in different folders.
+- Using `errorhandler` where `app_errorhandler` was needed.
+- Doing work at import time (creating the app, connecting to the database) instead of inside `create_app`.
+- Giving two blueprints the same name.
+
+## Recap
+- A blueprint bundles one feature's routes and handlers without an app. `register_blueprint` activates it, and `url_prefix` places it in the URL space.
+- An application factory builds a fresh, configurable app. Keep `db` and other extensions in `extensions.py`, with no imports of your own code, to avoid circular imports.
+- Endpoints become `blueprint.function`. Use full names in templates, a leading dot inside a blueprint, and `flask routes` to inspect them.
+- One templates folder with a subfolder per blueprint avoids collisions.
+- `before_request` and `errorhandler` affect one blueprint. `before_app_request` and `app_errorhandler` affect the whole app.
+- The factory makes every test start from a clean app.
+
+===TASKS===
+### Split Hub into a package | guided
+Turn a copy of your Hub into the package layout of Part 3: `config.py`, `hub/__init__.py` with `create_app`, `extensions.py`, `models.py`, and two blueprints, `main` (home and about) and `lessons` (list and detail). Run it with `flask --app hub run`, then run `flask --app hub routes` and copy the table. List every `url_for` call in your templates that needed updating.
+HINT: Keep the blueprint imports inside `create_app`. Update `url_for("home")` to `url_for("main.home")` and similar.
+EXPECT: The site works as before, `flask routes` shows endpoints like `main.home` and `lessons.detail`, and you found at least the navigation links and the lesson links to update.
+SOL:
+```python
+# hub/main/routes.py
+from flask import Blueprint, render_template
+
+bp = Blueprint("main", __name__)
+
+@bp.route("/")
+def home():
+    return render_template("main/home.html")
+
+@bp.route("/about")
+def about():
+    return render_template("main/about.html")
+```
+```html
+<!-- base.html navigation -->
+<a href="{{ url_for('main.home') }}">Home</a>
+<a href="{{ url_for('lessons.index') }}">Lessons</a>
+<a href="{{ url_for('main.about') }}">About</a>
+```
+### Break it on purpose | guided
+Produce, read and fix each of these errors in your package: (1) a `BuildError` by leaving an old `url_for("home")` in a template, (2) a 404 by removing the `register_blueprint` line for `lessons`, (3) a `TemplateNotFound` by moving a template into the wrong subfolder, (4) a circular import by importing `create_app` inside `extensions.py`. For each, write the exact message and the one-line fix.
+HINT: The `BuildError` message contains a suggestion. The circular import message contains the phrase "partially initialized module".
+EXPECT: Four errors reproduced, each fixed, and a list of the messages in your notes.
+SOL:
+```python
+# 4. extensions.py (WRONG)
+from hub import create_app   # hub/__init__.py imports extensions, extensions imports hub: cycle
+# Fix: extensions.py imports nothing from hub; only third-party libraries.
+```
+### Scope of handlers | independent
+Add `@bp.errorhandler(404)` to the `lessons` blueprint returning `Lesson not found` and `@bp.app_errorhandler(404)` in `main` returning `Page not found`. Make `/lessons/99` (unknown lesson, via `db.get_or_404`) and `/nowhere` (no such URL) both 404 and record which handler answered each. Then move both behaviours into a test. Add a `before_request` to `lessons` that records the path in a list and a `before_app_request` in `main` doing the same into another list, and show which requests each saw.
+HINT: A request for an unknown URL is handled by no blueprint, so only the app-level handler can answer it.
+EXPECT: `/lessons/99` is answered by the blueprint handler, `/nowhere` by the app handler, the `before_request` list contains only `/lessons/...` paths and the `before_app_request` list contains every path.
+SOL:
+```python
+seen_blueprint, seen_app = [], []
+
+@bp.before_request
+def note_blueprint():
+    seen_blueprint.append(request.path)
+
+@bp.errorhandler(404)
+def lessons_404(error):
+    return "Lesson not found", 404
+
+# in main/routes.py
+@bp.before_app_request
+def note_app():
+    seen_app.append(request.path)
+
+@bp.app_errorhandler(404)
+def not_found(error):
+    return "Page not found", 404
+```
+### Template collisions | independent
+Create two blueprints, `lessons` and `tags`, each with a view rendering `"index.html"`, and put a different `index.html` in each blueprint's own template folder. Show which one is rendered for both views, explain why, then fix the problem by moving to `templates/lessons/index.html` and `templates/tags/index.html` and updating the `render_template` calls. Write a test that requests both pages and asserts each contains its own heading.
+HINT: With blueprint-level template folders Flask searches in registration order and returns the first match.
+EXPECT: Before the fix both pages show the same template (the first found). After the fix each shows its own heading and the test passes.
+SOL:
+```python
+def test_templates_do_not_collide(client):
+    assert "Lessons" in client.get("/lessons/").get_data(as_text=True)
+    assert "Tags" in client.get("/tags/").get_data(as_text=True)
+```
+### Hub as four blueprints | challenge
+Restructure Hub v4 into the package layout with four blueprints: `main` (home, about, error pages), `lessons` (list, detail, tags, filtering), `feedback` (form, list, delete) and `progress` (a user's progress and the completion action, using the stand-in login for now). Update every `url_for`, make the navigation highlight the active **section** with `request.blueprint`, keep all migrations working (`flask --app hub db upgrade` on a fresh file), move the stand-in login into its own `auth` blueprint registered only when `app.debug or app.testing`, and write tests: every GET route responds, the factory produces independent apps (data in one is invisible in another), `db upgrade` works from scratch, and a test lists all endpoints and asserts each has the form `blueprint.function`.
+HINT: `[rule.endpoint for rule in app.url_map.iter_rules() if rule.endpoint != "static"]` lists the endpoints. Registering the dev login conditionally belongs in `create_app`.
+EXPECT: All tests pass, `flask routes` shows five blueprints in its endpoint names, and the navigation highlights `Lessons` on every `lessons.*` page.
+SOL:
+```python
+def test_endpoints_are_namespaced(app):
+    names = [r.endpoint for r in app.url_map.iter_rules() if r.endpoint != "static"]
+    assert names and all("." in n for n in names)
+
+def test_apps_are_independent():
+    a = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://"})
+    b = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://"})
+    with a.app_context():
+        db.create_all()
+        db.session.add(Lesson(title="Only in a", week=1)); db.session.commit()
+    with b.app_context():
+        db.create_all()
+        assert db.session.scalar(db.select(db.func.count()).select_from(Lesson)) == 0
+```
+===QUIZ===
+Q: What is a blueprint?
+- A second Flask app
+- A bundle of routes and handlers for one feature, defined without an app and registered later *
+- A database table
+- A template language
+WHY: Blueprints let you build features separately and plug them into an app with `register_blueprint`.
+Q: What is the endpoint name for a view `detail` in a blueprint named `lessons`?
+TYPE: lessons.detail
+WHY: Endpoints become `blueprint.function`, which is also what `url_for` expects.
+Q: You move to blueprints and a template still calls `url_for("login")`. What happens?
+- It works anyway
+- `BuildError`, with a suggestion such as `auth.login` *
+- A 404 page
+- A silent empty link
+WHY: The endpoint is now namespaced, so the old name no longer exists.
+Q: Why does `create_app()` import the blueprints inside the function?
+- Python requires it
+- It avoids circular imports and makes each call build a fresh app *
+- It makes imports faster
+- Blueprints cannot be imported at the top
+WHY: Blueprint modules import `db` and models, so importing them at module level can create import cycles.
+Q: Where should `db = SQLAlchemy(...)` live to avoid circular imports?
+- In `app.py` next to the routes
+- In `extensions.py`, which imports none of your own modules *
+- Inside each blueprint
+- In `config.py`
+WHY: Models and blueprints can all import `db` from there without importing each other.
+Q: What does `url_for(".detail", lesson_id=3)` mean inside the `lessons` blueprint?
+- The `detail` endpoint of the same blueprint *
+- A static file
+- The app-level `detail` endpoint
+- An error
+WHY: The leading dot means "in my own blueprint", which survives a rename.
+Q: Which decorator handles 404s for the whole app when registered on a blueprint?
+- `@bp.errorhandler(404)`
+- `@bp.app_errorhandler(404)` *
+- `@bp.before_request`
+- `@bp.route(404)`
+WHY: A plain `errorhandler` only sees errors raised inside that blueprint, not unknown URLs.
+Q: Which hook runs for every request in the app, whichever blueprint serves it?
+TYPE: before_app_request | @bp.before_app_request
+WHY: `before_request` on a blueprint only covers that blueprint. The `app` variant covers everything, which suits loading the current user.
+Q: Two blueprints both have `templates/index.html` in their own template folders. What happens?
+- Flask raises an error
+- The first match found is used for both, silently *
+- Each blueprint gets its own
+- The app crashes
+WHY: Template folders are merged into one namespace. Subfolders such as `lessons/index.html` prevent collisions.
+Q: What does forgetting `app.register_blueprint(bp)` cause?
+- An import error
+- The blueprint's URLs return 404 *
+- A BuildError only
+- The app slows down
+WHY: Until registered, the blueprint's routes are not part of the app's URL map.
+</script>
+<script type="text/markdown" id="n-8-2">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain why a password must never be stored as readable text, distinguish hashing from encryption, explain what a salt is and why fast hashes such as SHA-256 are the wrong tool, hash and verify passwords with Werkzeug, add a user model and a registration view with proper validation, normalise emails, handle duplicate registrations through the database constraint, apply sensible password rules, and demonstrate for yourself how a leaked table of weak hashes is cracked.
+
+Authentication begins with registration, and registration begins with a decision you cannot undo later: how passwords are stored. Get this wrong and one database leak exposes every user's accounts on **every other site where they reused the password**.
+
+## Part 1: Three ways to store a password
+**Route A, plain text.** The column `password` holds `"hunter2"`. Outcome: anyone with database access, a backup, a log file, a leaked dump or a curious administrator reads every password. This is a catastrophic failure that has hit real companies.
+
+**Route B, encryption.** The password is scrambled with a key and can be unscrambled with it. Outcome: better, but the key must live somewhere your application can reach, so an attacker who steals the database **and** the server steals the key as well, and your own staff can decrypt. Worse, there is **no reason your application ever needs to read a user's password back**.
+
+**Route C, hashing.** A **hash function** turns any input into a fixed-size scramble, one-way: you can compute the hash from the password, but you cannot compute the password from the hash. To check a login you hash what the user typed and compare it with the stored hash. Outcome: the application never knows the password after the moment of checking, and a stolen database does not directly contain passwords. This is the correct design.
+
+The three differ in a single idea: **encryption is reversible, hashing is not.** Use hashing for passwords, always.
+
+## Part 2: Why an ordinary hash is not enough
+You might think "hash with SHA-256 and be done."
+```python
+import hashlib
+hashlib.sha256(b"hunter2").hexdigest()
+# 'f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7'
+```
+That is one-way, but it has two serious weaknesses.
+
+**Weakness 1, the same password always gives the same hash.** Attackers precompute tables of hashes for millions of common passwords ("rainbow tables"). They look up each stolen hash and read off the password in an instant. And in your database, two users with the same password have the same hash, so cracking one cracks both, and everyone can see who shares passwords.
+
+**The cure is a salt:** a random value, unique per password, mixed into the hash. Now `hunter2` hashed for Ada differs from `hunter2` hashed for Bo, so precomputed tables are useless and each hash must be attacked separately. The salt is not secret. It is stored next to the hash. Its job is only to make every hash unique.
+
+**Weakness 2, SHA-256 is far too fast.** It was designed to hash large files quickly, and a modern graphics card computes **billions of SHA-256 hashes per second**. If an attacker can try a billion guesses a second, most human-chosen passwords fall in minutes. Password hashing needs the opposite property: it should be **deliberately slow and memory-hungry**, so that one guess costs, say, 50 milliseconds and a lot of memory. A legitimate login does it once and the user notices nothing. An attacker making billions of guesses is slowed by a factor of millions.
+
+Algorithms designed for this are **scrypt**, **bcrypt** and **Argon2**. They take tunable "cost" settings that you raise as computers get faster.
+
+## Part 3: Hashing with Werkzeug
+Flask's underlying library already includes a correct implementation, so you do not need to invent or install anything.
+```python
+from werkzeug.security import generate_password_hash, check_password_hash
+
+hash1 = generate_password_hash("hunter2")
+hash2 = generate_password_hash("hunter2")
+print(hash1)
+# scrypt:32768:8:1$QD6kjIxnAKPiq$7e3f...(long hex)
+print(hash1 == hash2)                       # False: different random salts
+print(check_password_hash(hash1, "hunter2"))  # True
+print(check_password_hash(hash1, "Hunter2"))  # False
+```
+Read the stored string `scrypt:32768:8:1$QD6kjIxnAKPiq$7e3f...`:
+- `scrypt:32768:8:1` is the **method and its cost parameters**. Storing them with the hash means old hashes keep working when you later raise the cost.
+- `QD6kjIxnAKPiq` is the **salt**, generated randomly by `generate_password_hash` each time.
+- The last part is the **hash itself**.
+
+Everything needed to verify is inside the one string, so a single column holds it. `check_password_hash(stored, typed)` re-hashes `typed` using the same method and salt, then compares in a way that does not leak timing information. Use `String(255)` or `Text` for the column, since hashes are long.
+
+**Never** write your own scheme such as `sha256(password + "mysalt")`. The point of using a vetted function is that experts already made the hard decisions.
+
+## Part 4: The user model
+```python
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
+from werkzeug.security import generate_password_hash, check_password_hash
+
+class User(db.Model):
+    __tablename__ = "users"
+
+    id:            Mapped[int] = mapped_column(primary_key=True)
+    name:          Mapped[str] = mapped_column(String(80))
+    email:         Mapped[str] = mapped_column(String(254), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    is_admin:      Mapped[bool] = mapped_column(default=False, server_default="0")
+
+    def set_password(self, password: str) -> None:
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+```
+Notice what is **absent**: there is no `password` column, and no way to read a password back. The model offers two operations, `set_password` and `check_password`, which keeps the hashing in one place so no view can forget to hash. `String(254)` is the practical maximum length of an email address.
+
+## Part 5: Normalising and validating registration input
+```python
+def normalise_email(raw: str) -> str:
+    return raw.strip().lower()
+```
+Why normalise? Without it, `Ada@Example.com` and `ada@example.com` become two accounts, and a user who registered with a capital letter fails to log in by typing lowercase. Strip spaces and lowercase before **both** saving and searching. (Strictly speaking the part before the `@` may be case-sensitive in theory, but practically no mainstream provider treats it so.)
+
+Passwords themselves are **never** stripped, lowercased or altered, because a space can be a legitimate part of one.
+
+**What makes a good password rule?** Current guidance (from standards bodies such as NIST) says:
+- **Length matters most.** Require a minimum of at least 8 characters, and allow long ones, with a generous maximum such as 128 (the maximum prevents someone sending a megabyte string to waste your server's hashing time).
+- **Block known bad passwords**: a short list of common ones (`password`, `12345678`, `qwerty123`) and passwords equal to the email.
+- **Avoid composition rules** such as "must include a symbol and a digit." They push people towards `Password1!`, which is weak and predictable.
+- **Never silently truncate or limit to certain characters.**
+```python
+COMMON = {"password", "12345678", "qwerty123", "letmein1", "iloveyou"}
+
+def validate_password(password: str, email: str) -> str | None:
+    if len(password) < 8:
+        return "Use at least 8 characters."
+    if len(password) > 128:
+        return "Use at most 128 characters."
+    if password.lower() in COMMON or password.lower() == email:
+        return "That password is too easy to guess."
+    return None
+```
+
+## Part 6: The registration view
+```python
+@bp.route("/register", methods=["GET", "POST"])
+def register():
+    errors, values = {}, {}
+    if request.method == "POST":
+        values = {"name": request.form.get("name", "").strip(),
+                  "email": normalise_email(request.form.get("email", ""))}
+        password = request.form.get("password", "")
+        if not 2 <= len(values["name"]) <= 80:
+            errors["name"] = "Name must be 2 to 80 characters."
+        if "@" not in values["email"] or "." not in values["email"].split("@")[-1]:
+            errors["email"] = "Enter a valid email address."
+        message = validate_password(password, values["email"])
+        if message:
+            errors["password"] = message
+        if not errors:
+            user = User(name=values["name"], email=values["email"])
+            user.set_password(password)
+            db.session.add(user)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                errors["email"] = "That email is already registered."
+            else:
+                flash("Account created. You can log in now.", "success")
+                return redirect(url_for("auth.login"))
+        return render_template("auth/register.html", errors=errors, values=values), 400
+    return render_template("auth/register.html", errors=errors, values=values)
+```
+Everything here repeats earlier lessons, now applied together: validation in Python, uniqueness decided by the **`UNIQUE` constraint** and caught as `IntegrityError` (Lesson 5-3), PRG (Lesson 4-1), a flash message (Lesson 4-4).
+
+Three details deserve attention.
+- **`values` never contains the password.** If validation fails, the form is shown again with the name and email refilled but the password field empty. A password must never be echoed back into HTML.
+- In the template the password field is `<input type="password" name="password" autocomplete="new-password">`. The `autocomplete` value tells password managers to offer a new strong password.
+- **User enumeration.** "That email is already registered" tells an attacker which emails have accounts. For a learning site this is acceptable and friendlier. Larger sites often answer generically ("check your inbox") and send an email either way. It is a real trade-off between usability and privacy, and you should know you are making it.
+
+## Part 7: Seeing why it matters
+The following experiment is worth running yourself on data that is entirely yours. It shows why Part 2 is not paranoia.
+```python
+import hashlib, time
+
+wordlist = ["password", "123456", "qwerty", "letmein", "hunter2", "iloveyou", "dragon"]
+leaked = [hashlib.sha256(w.encode()).hexdigest() for w in ["letmein", "dragon"]]   # unsalted SHA-256
+
+start = time.perf_counter()
+for guess in wordlist:
+    if hashlib.sha256(guess.encode()).hexdigest() in leaked:
+        print("cracked:", guess)
+print(f"{time.perf_counter() - start:.5f} seconds")
+```
+Seven guesses against unsalted SHA-256 take microseconds, and a real attacker uses a wordlist of billions. Now time the same number of checks against Werkzeug's scrypt:
+```python
+stored = generate_password_hash("letmein")
+start = time.perf_counter()
+for guess in wordlist:
+    check_password_hash(stored, guess)
+print(f"{time.perf_counter() - start:.2f} seconds")
+```
+Each guess costs tens of milliseconds, around **ten thousand times slower per guess** than SHA-256 on the same computer, and the salt means the work must be repeated for every user. That gap is the whole defence.
+
+## Part 8: Keeping hashes current
+Computers get faster, so the recommended cost rises over time. Because the method and parameters are stored in the hash string, you can upgrade gradually: when a user logs in successfully, you have their plain password for a moment, so you can re-hash it with current settings and save it. A simple check is whether the stored string starts with the method you want (`stored.startswith("scrypt:")`). Lesson 8-5's challenge adds this.
+
+Other rules that belong with password storage:
+- **Never log** passwords, not in print statements, error messages or request logs.
+- **Use HTTPS** in production (Week 11), otherwise passwords cross the network readable.
+- **Never email a password.** Password reset sends a **link with a one-time token** instead (a later lesson idea).
+- **Never ask for a password in a GET request** or put one in a URL.
+
+## Recap
+- Store passwords as hashes, never as text or reversible encryption. Hashing is one-way, so the application never needs the password again.
+- A salt makes every hash unique and defeats precomputed tables. A good password hash is deliberately slow (scrypt, bcrypt, Argon2), unlike SHA-256.
+- Use `generate_password_hash` and `check_password_hash`. The stored string carries method, cost and salt, so one column is enough.
+- Put `set_password` and `check_password` on the model, normalise emails (strip, lowercase), and never alter or echo passwords.
+- Prefer length and a blocklist to composition rules. Let the `UNIQUE` constraint reject duplicate emails and handle `IntegrityError`.
+- Re-hash on login when the cost has been raised. Never log or email passwords.
+
+===TASKS===
+### Hash, salt and verify | guided
+In a script, hash the same password twice with `generate_password_hash`, print both strings and compare them. Verify the right password, a wrong one, and the same password with different capitalisation. Split one stored string on `$` and label its three parts. Time one `generate_password_hash` call and one `check_password_hash` call.
+HINT: Use `time.perf_counter()` around each call. The split gives method, salt and hash.
+EXPECT: Two different strings for the same password, `True` only for the exact password, and each call taking tens of milliseconds.
+SOL:
+```python
+import time
+from werkzeug.security import generate_password_hash, check_password_hash
+
+a = generate_password_hash("hunter2")
+b = generate_password_hash("hunter2")
+print(a == b)
+print(check_password_hash(a, "hunter2"), check_password_hash(a, "wrong"), check_password_hash(a, "Hunter2"))
+method, salt, digest = a.split("$")
+print("method:", method, "salt:", salt, "hash length:", len(digest))
+
+start = time.perf_counter(); generate_password_hash("hunter2")
+print("generate:", time.perf_counter() - start)
+start = time.perf_counter(); check_password_hash(a, "hunter2")
+print("check:", time.perf_counter() - start)
+```
+### Fast hash versus slow hash | guided
+Build a list of 20 common passwords. Create an "unsalted SHA-256 leak" of three of them and "crack" it with your wordlist, timing it. Then create one scrypt hash and time how long checking all 20 guesses takes. Compute the ratio and write two sentences explaining what it means for an attacker with a billion guesses.
+HINT: Use `hashlib.sha256(word.encode()).hexdigest()` for the leak.
+EXPECT: The SHA-256 attack finishes in microseconds and the scrypt checks take seconds, a ratio of thousands to tens of thousands.
+SOL:
+```python
+import hashlib, time
+words = ["password", "123456", "qwerty", "letmein", "hunter2", "iloveyou", "dragon", "monkey",
+         "sunshine", "princess", "football", "welcome", "shadow", "master", "login",
+         "abc123", "trustno1", "passw0rd", "admin", "flower"]
+leak = {hashlib.sha256(w.encode()).hexdigest() for w in ("letmein", "dragon", "admin")}
+t0 = time.perf_counter()
+cracked = [w for w in words if hashlib.sha256(w.encode()).hexdigest() in leak]
+fast = time.perf_counter() - t0
+stored = generate_password_hash("admin")
+t0 = time.perf_counter()
+for w in words:
+    check_password_hash(stored, w)
+slow = time.perf_counter() - t0
+print(cracked, fast, slow, slow / fast)
+```
+### User model and registration | independent
+Add the `User` model from Part 4 and a registration view with all the validation of Part 6: name length, email shape and normalisation, `validate_password`, duplicate email through `IntegrityError` with `rollback`, flash and redirect on success. The password must never be re-displayed. Write tests with the test client: a good registration redirects and stores a hash that is **not** the password, a duplicate (even with different capitalisation and spaces) is refused with status 400, a short password is refused, and the response HTML for a failed registration does not contain the submitted password.
+HINT: Send `email=" Ada@Example.com "` in the second registration. Read the stored user through `db.session` in an app context.
+EXPECT: All four tests pass, `password_hash` starts with `scrypt:` (or your Werkzeug's default method), and the plaintext password appears nowhere in the HTML.
+SOL:
+```python
+def test_register_and_duplicate(client, app):
+    ok = client.post("/auth/register", data={"name": "Ada", "email": "ada@example.com",
+                                             "password": "correct horse battery"})
+    assert ok.status_code == 302
+    with app.app_context():
+        user = db.session.scalar(db.select(User))
+        assert user.password_hash != "correct horse battery"
+        assert user.check_password("correct horse battery")
+    dup = client.post("/auth/register", data={"name": "Ada2", "email": "  ADA@Example.com ",
+                                              "password": "another long password"})
+    assert dup.status_code == 400
+    short = client.post("/auth/register", data={"name": "Bo", "email": "bo@example.com", "password": "short"})
+    assert short.status_code == 400
+    assert 'value="short"' not in short.get_data(as_text=True)
+```
+### Password rules | independent
+Write `validate_password(password, email)` following Part 5 (length 8 to 128, blocklist, not the email), and a test table with at least 12 cases including empty, 7 characters, exactly 8, exactly 128, 129, the email itself, `Password1!` (allowed by this policy, discuss why that is a problem for composition rules too), and a long passphrase with spaces. In a comment explain why a maximum length exists and why there is no rule about symbols.
+HINT: The maximum protects your server from huge inputs, since hashing cost is paid for every attempt.
+EXPECT: Every case returns the expected message or `None`, and your comment names the denial-of-service reason for the maximum.
+SOL:
+```python
+cases = [
+    ("", "a@b.co", "Use at least 8 characters."),
+    ("1234567", "a@b.co", "Use at least 8 characters."),
+    ("12345678", "a@b.co", "That password is too easy to guess."),
+    ("a" * 8, "a@b.co", None),
+    ("a" * 128, "a@b.co", None),
+    ("a" * 129, "a@b.co", "Use at most 128 characters."),
+    ("a@b.co", "a@b.co", "That password is too easy to guess."),
+    ("correct horse battery staple", "a@b.co", None),
+]
+for password, email, expected in cases:
+    assert validate_password(password, email) == expected, (password, expected)
+# Maximum length: hashing is deliberately slow, so a megabyte password would waste server time.
+# No symbol rule: such rules produce predictable passwords like Password1!.
+```
+### Change password and upgrade hashes | challenge
+Add a `/auth/password` page for a logged-in user (use the stand-in login for now). It requires the **current** password, a new password following the policy (and different from the current one), and a confirmation field that must match. Add `needs_rehash(stored)` returning `True` when the stored hash does not use the current method, and `verify_and_upgrade(user, password)` which checks the password and, on success, re-saves a fresh hash if `needs_rehash` is true. Test with a user whose stored hash was created with `method="pbkdf2:sha256"`: verification works, the stored hash is upgraded to scrypt, and verification still works afterwards. Also test that a wrong current password changes nothing.
+HINT: `generate_password_hash("pw", method="pbkdf2:sha256")` creates an old-style hash. Compare `stored.split("$")[0].startswith("scrypt")`.
+EXPECT: The old hash is replaced after one successful check, a wrong current password leaves the hash unchanged, and the new password works on the next login.
+SOL:
+```python
+def needs_rehash(stored: str) -> bool:
+    return not stored.startswith("scrypt:")
+
+def verify_and_upgrade(user, password: str) -> bool:
+    if not user.check_password(password):
+        return False
+    if needs_rehash(user.password_hash):
+        user.set_password(password)
+        db.session.commit()
+    return True
+```
+===QUIZ===
+Q: Why is hashing preferred over encryption for storing passwords?
+- Hashing is faster to write
+- Hashing is one-way, and the application never needs to read a password back *
+- Encryption cannot handle text
+- Hashes are shorter
+WHY: With encryption anyone holding the key can recover every password. A hash cannot be reversed.
+Q: What problem does a salt solve?
+- Slow logins
+- It makes identical passwords produce different hashes and defeats precomputed tables *
+- Long passwords
+- Forgotten passwords
+WHY: Each hash must be attacked separately, and users sharing a password are no longer identifiable.
+Q: Why is SHA-256 a poor choice for hashing passwords?
+- It produces long output
+- It is extremely fast, so attackers can test billions of guesses per second *
+- It needs a key
+- It is not one-way
+WHY: Password hashes should be slow and memory-hungry. Use scrypt, bcrypt or Argon2.
+Q: Which Werkzeug function creates a salted, slow hash for a password?
+TYPE: generate_password_hash
+WHY: It generates a random salt, hashes with the configured method and returns one string with everything needed to verify.
+Q: Why does `generate_password_hash("hunter2") == generate_password_hash("hunter2")` give `False`?
+- A bug
+- Each call uses a new random salt *
+- The comparison is wrong
+- Hashes expire
+WHY: The salt differs, so the stored strings differ, yet `check_password_hash` verifies both.
+Q: What is stored in the hash string `scrypt:32768:8:1$salt$hash`?
+- Only the hash
+- The method and cost settings, the salt and the hash *
+- The password and a key
+- A session id
+WHY: Storing the method and cost with the hash allows verification and gradual upgrades.
+Q: Why should you strip and lowercase an email but never alter a password?
+- Passwords are case-insensitive
+- Different email spellings should be one account, but every character of a password is meaningful *
+- Python forbids it
+- Emails are secret
+WHY: Normalising emails avoids duplicates and failed logins. Changing a password would lock users out.
+Q: Why does a sensible password policy set a maximum length such as 128?
+- Longer passwords are insecure
+- Hashing is deliberately slow, so huge inputs could be used to waste server time *
+- Databases cannot store them
+- Browsers limit it
+WHY: Without a cap, an attacker can send enormous passwords to burn CPU on every attempt.
+Q: Who should decide that two registrations cannot share one email?
+- A SELECT in the view before inserting
+- The UNIQUE constraint, with the view catching `IntegrityError` *
+- The browser
+- The template
+WHY: Only the constraint is checked atomically, avoiding the race of a check-then-insert.
+Q: Where must a failed registration form never show the submitted password?
+TYPE: in the HTML | html | the page | the form
+WHY: Re-render the name and email but leave the password field empty, so it is not echoed back into a page.
+</script>
+<script type="text/markdown" id="n-8-3">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain authentication and authorization, build login and logout using the signed session of Lesson 4-4, load the current user on every request, write a `login_required` decorator and understand how decorators work in this role, redirect users back to where they were going without creating an open redirect vulnerability, give login error messages that do not help attackers, configure session cookie security, and test the whole flow with the test client.
+
+You will build login **by hand** in this lesson. Lesson 8-4 then introduces Flask-Login, and because you wrote the machinery yourself you will recognise exactly what it automates. That order is deliberate: a library you do not understand is a library you cannot debug.
+
+## Part 1: Two words that are often confused
+- **Authentication** answers "**who are you?**" It is proving identity, usually with an email and password.
+- **Authorization** answers "**what are you allowed to do?**" A logged-in user may edit their own profile but not delete someone else's lesson, and only an administrator may open the admin pages.
+
+Authentication comes first, authorization builds on it. This lesson is authentication. Lesson 8-4 adds authorization.
+
+Recall the problem from Lesson 4-4: HTTP is stateless, so after a login request the server has no memory that you logged in. The signed session cookie is the memory. **Logging in means putting the user's id in the session. Logging out means removing it.** Everything else in this lesson is consequence.
+
+## Part 2: The login view
+```python
+from werkzeug.security import check_password_hash, generate_password_hash
+
+DUMMY_HASH = generate_password_hash("not-a-real-password")
+
+@bp.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        user = db.session.scalar(db.select(User).where(User.email == email))
+
+        if user is not None:
+            ok = user.check_password(password)
+        else:
+            check_password_hash(DUMMY_HASH, password)     # spend the same time
+            ok = False
+
+        if ok:
+            session.clear()
+            session["user_id"] = user.id
+            flash("Welcome back.", "success")
+            return redirect(safe_next(request.args.get("next")) or url_for("main.home"))
+
+        flash("Wrong email or password.", "danger")
+        return render_template("auth/login.html", email=email), 401
+    return render_template("auth/login.html", email="")
+```
+Walk through the decisions, because each one is a security lesson.
+- **The same message for both failures.** "Wrong email or password" is the answer whether the email does not exist or the password is wrong. If the page said "no such user" for one and "wrong password" for the other, an attacker could test which emails have accounts (**user enumeration**).
+- **The dummy hash.** If an unknown email returned immediately but a known email spent 50 milliseconds hashing, an attacker could tell the two apart **by timing**. Checking the typed password against a throwaway hash for unknown emails makes both paths take about the same time.
+- **`session.clear()` before storing the id.** It removes anything left in the session from before login (an old user's data, a half-finished form) so the new login starts clean. Hygiene, and it also defends against **session fixation**, where an attacker plants a session and waits for a victim to log in under it.
+- **`session["user_id"] = user.id`** is the login itself. Only the **id** is stored, never the password or the hash, and not the whole user: the session cookie is readable by the user (Lesson 4-4), signed but not encrypted, and the data should be fetched fresh from the database each time.
+- **Status 401** (Unauthorized, which in practice means "not authenticated") tells tests and tools the login failed, while a normal 200 would suggest success.
+- `email` is passed back to refill the form, the password is not.
+
+## Part 3: Knowing who is logged in on every request
+Putting the id in the session is useless unless every request can turn it back into a user. Do it once per request, **before** the view runs, and store the result on `g` (Lesson 5-5):
+```python
+from flask import g
+
+@bp.before_app_request
+def load_current_user():
+    user_id = session.get("user_id")
+    g.user = db.session.get(User, user_id) if user_id is not None else None
+    if user_id is not None and g.user is None:
+        session.clear()               # the account was deleted: drop the stale session
+```
+- `before_app_request` (Lesson 8-1) runs for **every** request in the app, not just the auth blueprint.
+- `g.user` is `None` for visitors and a `User` object for logged-in people. Views and templates can now ask `g.user` anything.
+- **The stale session case.** A cookie may name a user that has since been deleted. Without this check `g.user` would be `None` while `"user_id"` remains, and code that assumes consistency would misbehave. Clearing it fixes the inconsistency.
+- This costs one primary-key lookup per request, which is cheap, and it means a banned or deleted account loses access immediately.
+
+Use it in templates directly, or expose it with a context processor:
+```html
+{% if g.user %}
+  <span>{{ g.user.name }}</span>
+  <form method="post" action="{{ url_for('auth.logout') }}"><button>Log out</button></form>
+{% else %}
+  <a href="{{ url_for('auth.login') }}">Log in</a>
+  <a href="{{ url_for('auth.register') }}">Register</a>
+{% endif %}
+```
+Logout is a **form with POST**, not a link. A GET that changes state (logging you out) can be triggered by any image tag on any website, and Lesson 3-1 taught that GET must be safe.
+
+## Part 4: Protecting views with a decorator
+You want some views to require login. Repeating `if g.user is None: return redirect(...)` at the top of dozens of views is the kind of repetition decorators exist to remove.
+```python
+import functools
+from flask import g, redirect, request, url_for, flash
+
+def login_required(view):
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if g.user is None:
+            flash("Please log in first.", "warning")
+            return redirect(url_for("auth.login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
+
+@bp.route("/progress")
+@login_required
+def progress():
+    ...
+```
+This is the decorator pattern from Week 1, so read it in those terms:
+- `login_required(view)` takes a function and returns a **new function** `wrapped` that does the check, then calls the original.
+- `*args, **kwargs` pass through anything Flask supplies, such as URL variables.
+- **`functools.wraps(view)`** copies the original function's name onto `wrapped`. This matters in Flask because the **endpoint name is the function name**. Without `wraps`, every protected view would be named `wrapped`, and Flask would raise `AssertionError: View function mapping is overwriting an existing endpoint function: wrapped` on the second one.
+- **Order matters:** `@bp.route(...)` must be the **outer** (top) decorator, and `@login_required` the inner one. Flask registers whatever function is directly beneath `route`, which must be the protected one.
+- `next=request.path` remembers where the user was heading so login can send them back.
+
+## Part 5: The open redirect trap
+After login you redirect to `next`. But `next` comes from the URL, which an attacker controls:
+```
+https://yoursite.com/auth/login?next=https://evil.example/fake-login
+```
+If you blindly `redirect(request.args["next"])`, a victim clicks a genuine link to **your** site, logs in successfully, and is then sent to a copy of your site run by the attacker that says "session expired, enter your password again." This is an **open redirect**, and it turns your trusted address into a phishing tool.
+
+The defence is to accept only **local paths**:
+```python
+from urllib.parse import urlsplit
+
+def safe_next(target):
+    if not target or "\\" in target:
+        return None
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc:
+        return None
+    if not target.startswith("/") or target.startswith("//"):
+        return None
+    return target
+```
+Go through the rejections: a **scheme** (`https:`) or **network location** means it points to another site. `//evil.example` starts with a slash but browsers treat it as "same scheme, other host". A **backslash** is the sneaky one: browsers treat `/\evil.example` as `//evil.example`, so a check that only looks for `//` is bypassed. When in doubt reject. Returning `None` makes the caller fall back to the home page.
+
+This is a good example of why security code is written defensively: the **allowed** shape (a path starting with a single slash and nothing else) is described, instead of trying to list every bad shape.
+
+## Part 6: Logout and session settings
+```python
+@bp.post("/logout")
+def logout():
+    session.clear()
+    flash("You have been logged out.", "info")
+    return redirect(url_for("main.home"))
+```
+`session.clear()` removes the id and everything else. The cookie itself is replaced with an empty signed session.
+
+Cookie behaviour is controlled by configuration (Lesson 4-4's attributes):
+```python
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,       # already the default: JavaScript cannot read the cookie
+    SESSION_COOKIE_SAMESITE="Lax",      # not sent on most cross-site requests
+    SESSION_COOKIE_SECURE=True,         # only over HTTPS: set this in production
+    PERMANENT_SESSION_LIFETIME=timedelta(days=14),
+)
+```
+- **`SESSION_COOKIE_SECURE=True`** makes browsers refuse to send the cookie over plain HTTP. Turn it on in production but leave it off for local development, because `http://127.0.0.1:5000` is not HTTPS and login would appear broken.
+- **"Remember me"** is `session.permanent = True` at login, which gives the cookie a long lifetime (`PERMANENT_SESSION_LIFETIME`) instead of ending when the browser closes. Make it an opt-in checkbox on shared computers' behalf.
+- Remember Lesson 4-4: the session is **signed, not encrypted**. A stolen cookie is a stolen login, which is why HTTPS and `HttpOnly` matter, and why a long session lifetime is a trade-off between convenience and risk.
+
+## Part 7: Guessing attacks
+Nothing so far stops a script from trying 100 000 passwords against one account. Hash slowness (Lesson 8-2) helps, but real sites also add **rate limiting**: refuse or delay after several failed attempts per account and per IP address. The usual tool is the extension **Flask-Limiter**, e.g. `@limiter.limit("5 per minute")` on the login view. You can also count failures per account in the database and lock for a few minutes (the challenge builds this). Be aware that locking by account lets an attacker lock out a victim on purpose, so many sites delay rather than lock. There is no perfect answer, only trade-offs, and you should know the options exist.
+
+## Part 8: Testing the login flow
+```python
+def register(client, email="ada@example.com", password="correct horse battery"):
+    return client.post("/auth/register", data={"name": "Ada", "email": email, "password": password})
+
+def login(client, email="ada@example.com", password="correct horse battery", next_url=None):
+    url = "/auth/login" + (f"?next={next_url}" if next_url else "")
+    return client.post(url, data={"email": email, "password": password})
+
+def test_login_logout_flow(client):
+    register(client)
+    assert login(client, password="wrong").status_code == 401
+    assert login(client).status_code == 302
+    with client.session_transaction() as sess:
+        assert "user_id" in sess
+    assert client.get("/progress").status_code == 200
+    client.post("/auth/logout")
+    assert client.get("/progress").status_code == 302          # redirected to login
+
+def test_same_message_for_unknown_email_and_wrong_password(client):
+    register(client)
+    a = login(client, email="nobody@example.com", password="whatever12").get_data(as_text=True)
+    b = login(client, password="wrong password").get_data(as_text=True)
+    assert "Wrong email or password." in a and "Wrong email or password." in b
+```
+Small helper functions such as `register` and `login` keep every test short. You will reuse them in Lesson 8-5.
+
+## Part 9: Common mistakes
+- Different messages for unknown email and wrong password.
+- Storing the whole user object, the hash or the password in the session instead of the id.
+- Forgetting `functools.wraps` (`View function mapping is overwriting an existing endpoint function`).
+- Putting `@login_required` above `@bp.route` instead of below.
+- Redirecting to `next` without validating it.
+- Logout through a GET link.
+- Leaving `SESSION_COOKIE_SECURE` off in production, or on in local development.
+- Not handling a session whose user was deleted.
+
+## Recap
+- Authentication is proving who you are, authorization is deciding what you may do. Login is "put the user id in the session", logout is "clear it".
+- Give one generic failure message, equalise timing with a dummy hash, call `session.clear()` on login, and store only the id.
+- Load `g.user` in a `before_app_request` function, and handle sessions that name a deleted user.
+- `login_required` is a decorator that wraps the view. `functools.wraps` keeps the endpoint name, and it goes below `@bp.route`.
+- Accept `next` only if it is a local path (no scheme, no host, no `//`, no backslash) to avoid an open redirect.
+- Log out with POST, set secure cookie options in production, and add rate limiting against guessing.
+
+===TASKS===
+### Login and logout | guided
+In your auth blueprint add `/auth/login` as in Part 2 (a simple template with email and password fields), `/auth/logout` (POST only) and a home page that says `Hello, <name>` when logged in and `Hello, visitor` otherwise, using `g.user`. Register a user, log in, check the greeting, log out, check it again. Open the browser cookie viewer and compare the `session` cookie before and after login.
+HINT: Load `g.user` in a `before_app_request` function. The cookie value changes when the session contents change.
+EXPECT: The greeting changes with login state, the cookie differs before and after, and logout returns to the visitor greeting.
+SOL:
+```python
+@bp.before_app_request
+def load_current_user():
+    user_id = session.get("user_id")
+    g.user = db.session.get(User, user_id) if user_id is not None else None
+    if user_id is not None and g.user is None:
+        session.clear()
+
+# main/routes.py
+@bp.route("/")
+def home():
+    greeting = f"Hello, {g.user.name}" if g.user else "Hello, visitor"
+    return render_template("main/home.html", greeting=greeting)
+```
+### The decorator, understood | guided
+Write `login_required` without `functools.wraps`, apply it to two views, and read the error Flask gives. Then add `wraps` and confirm it works. Next write a second decorator `timed` of your own (prints how long the view took) and stack both on one view, trying both orders relative to `@bp.route`. Describe what happens when `@bp.route` is placed **below** `@login_required`.
+HINT: With `route` below the decorator, Flask registers the unprotected inner function, so the check never runs.
+EXPECT: Without `wraps`, the second view fails with `View function mapping is overwriting an existing endpoint function: wrapped`. With `route` in the wrong place the page is reachable without logging in.
+SOL:
+```python
+def login_required(view):
+    # missing @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if g.user is None:
+            return redirect(url_for("auth.login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+# WRONG order: route registers the raw function, so the protection is bypassed
+@login_required
+@bp.route("/secret")
+def secret():
+    return "secret"
+```
+### Safe redirects | independent
+Implement `safe_next` from Part 5 and write a table of at least 14 test cases: `None`, empty, `/progress`, `/progress?page=2`, `//evil.example`, `https://evil.example`, `http://evil.example/x`, `javascript:alert(1)`, `/\evil.example`, ` //evil.example` (leading space), `/%2F%2Fevil.example`, `///evil.example`, `/a/b/c`, and `evil.example`. For each state whether it must be accepted and why. Then add an integration test showing a login with `?next=//evil.example` redirects home.
+HINT: Think about what the browser does with each form. Anything not clearly a single-slash local path should be rejected.
+EXPECT: Only the local paths pass. Every external or ambiguous form returns `None`, and the integration test lands on the home page.
+SOL:
+```python
+cases = {
+    None: None, "": None, "/progress": "/progress", "/progress?page=2": "/progress?page=2",
+    "//evil.example": None, "https://evil.example": None, "http://evil.example/x": None,
+    "javascript:alert(1)": None, "/\\evil.example": None, " //evil.example": None,
+    "///evil.example": None, "/a/b/c": "/a/b/c", "evil.example": None,
+    "/%2F%2Fevil.example": "/%2F%2Fevil.example",   # a literal local path, not a host
+}
+for target, expected in cases.items():
+    assert safe_next(target) == expected, target
+```
+### Anti-enumeration test | independent
+Write tests proving that the login page gives the same visible message and the same status code for an unknown email and for a wrong password, and write a timing test that measures 20 attempts of each and asserts that their average durations differ by less than a factor of 2. Then temporarily remove the dummy hash and show the timing difference appears. In a comment, explain why a timing test must use a tolerance and cannot assert equality.
+HINT: Use `time.perf_counter()` and the average over many attempts. Without the dummy hash, unknown emails return in microseconds while known ones take tens of milliseconds.
+EXPECT: With the dummy hash both averages are similar. Without it the unknown-email average is dramatically smaller.
+SOL:
+```python
+import time
+
+def average_time(client, email, n=20):
+    start = time.perf_counter()
+    for _ in range(n):
+        client.post("/auth/login", data={"email": email, "password": "wrong password"})
+    return (time.perf_counter() - start) / n
+
+def test_timing_is_similar(client):
+    register(client)
+    known = average_time(client, "ada@example.com")
+    unknown = average_time(client, "nobody@example.com")
+    assert max(known, unknown) / min(known, unknown) < 2
+# Exact equality is impossible: operating system scheduling and caching add random noise.
+```
+### Complete auth blueprint | challenge
+Build the full `auth` blueprint: register (Lesson 8-2), login with remember-me (a checkbox that sets `session.permanent`), logout, `login_required`, `safe_next`, the stale-session check, and a simple **failed-attempt limiter**: store `failed_logins` and `locked_until` on the `User` (with a migration), lock an account for 5 minutes after 5 failures, show the same generic message while locked, and reset the counter after a success. Protect `/progress` and the feedback form. Write tests for every rule: protected pages redirect with `next`, login returns the user to `next` only when local, locking after five failures, unlocking after the time passes (set `locked_until` in the past), logout clears the session, and a deleted user's cookie no longer works.
+HINT: Compare `locked_until` with `datetime.now(timezone.utc)`. For the unlock test, edit the row to a past time instead of waiting. Keep the lock message identical to the normal failure message so locking does not reveal that the account exists.
+EXPECT: All behaviours pass as tests, and a locked account and a nonexistent account are indistinguishable from outside.
+SOL:
+```python
+from datetime import datetime, timedelta, timezone
+
+def locked(user):
+    return user.locked_until is not None and user.locked_until > datetime.now(timezone.utc).replace(tzinfo=None)
+
+def register_failure(user):
+    user.failed_logins += 1
+    if user.failed_logins >= 5:
+        user.locked_until = (datetime.now(timezone.utc) + timedelta(minutes=5)).replace(tzinfo=None)
+        user.failed_logins = 0
+    db.session.commit()
+
+def register_success(user):
+    user.failed_logins = 0
+    user.locked_until = None
+    db.session.commit()
+```
+===QUIZ===
+Q: What is the difference between authentication and authorization?
+- They are the same
+- Authentication proves who you are, authorization decides what you may do *
+- Authorization comes first
+- Authentication is only for admins
+WHY: Login establishes identity. Permissions are checked afterwards against that identity.
+Q: What does logging in mean in a hand-built session system?
+- Storing the password in a cookie
+- Putting the user's id in the signed session *
+- Creating a new database
+- Sending an email
+WHY: The session cookie is the server's memory. Logging out removes the id.
+Q: Why should login show the same message for an unknown email and a wrong password?
+- To save code
+- So attackers cannot discover which emails have accounts (user enumeration) *
+- Because errors are slow
+- Flask requires it
+WHY: Different messages let an attacker test whether an address is registered.
+Q: What is the purpose of checking the password against a dummy hash when the email is unknown?
+- To log the attempt
+- To make unknown and known emails take about the same time, defeating timing attacks *
+- To create the account
+- To speed up login
+WHY: Otherwise an unknown email returns instantly while a real one takes tens of milliseconds, revealing which exist.
+Q: What should the session contain after login?
+- The user's password
+- The password hash
+- The user's id only *
+- The whole user record
+WHY: The cookie is readable. Store a small identifier and load the rest from the database.
+Q: Which function must you use inside a decorator so Flask does not see every protected view as named `wrapped`?
+TYPE: functools.wraps | wraps
+WHY: Flask uses the function name as the endpoint, so `wraps` preserves it.
+Q: Which order is correct?
+- `@login_required` above `@bp.route("/x")`
+- `@bp.route("/x")` above `@login_required` *
+- Either order works
+- Neither can be combined
+WHY: `route` must register the protected function. With the wrong order it registers the raw view and bypasses the check.
+Q: What is an open redirect?
+- A redirect that loops forever
+- Redirecting to a user-supplied URL without checking, so your site can send victims to an attacker's page *
+- A redirect without a status code
+- A redirect to the home page
+WHY: A trusted login link on your site can end on a phishing page. Accept only local paths.
+Q: Why is logout done with POST rather than a link?
+- POST is faster
+- A GET that changes state can be triggered by any page or image on any site *
+- Links cannot reach Flask
+- Browsers forbid logout links
+WHY: GET must be safe (Lesson 3-1). State changes belong in POST.
+Q: Which setting makes browsers send the session cookie only over HTTPS?
+TYPE: SESSION_COOKIE_SECURE
+WHY: Turn it on in production. Keep it off for plain `http://127.0.0.1` development or login will appear broken.
+</script>
+<script type="text/markdown" id="n-8-4">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to explain cross-site request forgery (CSRF) and how a token defeats it, add CSRF protection by hand and with Flask-WTF, replace your hand-built login machinery with Flask-Login and say which part of it replaces which of your own code, use `current_user`, `login_user`, `logout_user` and `login_required`, and implement authorization: roles, admin-only areas, and ownership checks that stop one user acting on another's data, including the "insecure direct object reference" mistake.
+
+The NeuralNine video on user authentication uses an extension in this family. Because you built the mechanism yourself in Lesson 8-3, every call in the video will map onto something you already wrote, and this lesson shows the mapping.
+
+## Part 1: Cross-site request forgery
+Your site trusts any request that carries a valid session cookie, and **browsers attach cookies automatically to every request to your domain, whichever page caused the request**. Now suppose you are logged in to Hub in one tab and you open a malicious page in another. That page contains:
+```html
+<form action="https://hub.example/feedback/5/delete" method="post" id="f"></form>
+<script>document.getElementById("f").submit()<\/script>
+```
+Your browser sends the POST to Hub **with your cookie**. Hub sees a valid logged-in user making a legitimate-looking request and deletes the feedback. You never clicked anything on Hub. This is **CSRF**, and it works against any state-changing endpoint that relies only on cookies.
+
+Modern browsers help with `SameSite=Lax` cookies (Lesson 8-3), which are not sent on most cross-site POST requests. That is valuable but not a complete defence: it depends on the browser, and it does not cover every case (for example same-site subdomains and some older browsers). The standard defence is a **CSRF token**.
+
+**How a token works.** The server generates a random secret, stores it in the user's session, and writes it into every form as a hidden field. When a form is submitted, the server compares the field with the session copy. The malicious page cannot read your session and cannot read pages of Hub (browsers forbid that across sites), so it **cannot know the token** and its forged request is rejected.
+
+## Part 2: A CSRF check built by hand
+```python
+import secrets
+from flask import abort, request, session
+
+def csrf_token():
+    if "_csrf" not in session:
+        session["_csrf"] = secrets.token_hex(16)
+    return session["_csrf"]
+
+@bp.before_app_request
+def check_csrf():
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        sent = request.form.get("csrf_token") or request.headers.get("X-CSRFToken", "")
+        expected = session.get("_csrf", "")
+        if not expected or not secrets.compare_digest(sent, expected):
+            abort(400)
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+```
+```html
+<form method="post" action="{{ url_for('feedback.delete', entry_id=e.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button>Delete</button>
+</form>
+```
+- `secrets.token_hex(16)` makes 128 bits of cryptographic randomness. Use the `secrets` module, never `random`, for anything security-related.
+- The check covers **every state-changing method**, in one place. Safe methods (GET) are exempt, which is another reason GET must never change data.
+- `secrets.compare_digest` compares in constant time so the comparison itself does not leak how many characters matched.
+- The token is read from the form, or from a header so that JavaScript requests can send it too.
+- Registering the jinja global makes `csrf_token()` available in every template.
+- A missing or wrong token gives **400 Bad Request**.
+
+## Part 3: The same thing with Flask-WTF
+Writing this once is educational. In a real project use the maintained version:
+```powershell
+python -m pip install flask-wtf
+```
+```python
+# extensions.py
+from flask_wtf import CSRFProtect
+csrf = CSRFProtect()
+
+# create_app()
+csrf.init_app(app)
+```
+Forms use the same hidden field, written exactly as above (`{{ csrf_token() }}` is provided by the extension). It protects every POST, PUT, PATCH and DELETE automatically, supports the `X-CSRFToken` header, and uses time-limited tokens. A missing token produces a 400 with the message "The CSRF token is missing."
+
+**Testing with CSRF.** Turning it off in tests is common:
+```python
+create_app({"TESTING": True, "WTF_CSRF_ENABLED": False, ...})
+```
+That is convenient, but then your tests never exercise it. Have **at least one test with CSRF enabled** that fetches the form, extracts the token and submits it, plus one that omits it and expects 400:
+```python
+import re
+
+def get_token(client, url):
+    html = client.get(url).get_data(as_text=True)
+    return re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
+
+def test_post_without_token_is_rejected(app_with_csrf):
+    client = app_with_csrf.test_client()
+    assert client.post("/auth/login", data={"email": "a@b.co", "password": "x"}).status_code == 400
+```
+Do **not** exempt login and logout from CSRF: a forged login can sign a victim into the attacker's account, and a forged logout is a nuisance.
+
+## Part 4: Flask-Login, what it automates
+You wrote four things by hand in Lesson 8-3: putting the user id in the session, loading the user on every request, the `login_required` decorator with a redirect, and logout. **Flask-Login** packages exactly those.
+```powershell
+python -m pip install flask-login
+```
+```python
+# extensions.py
+from flask_login import LoginManager
+login_manager = LoginManager()
+login_manager.login_view = "auth.login"
+login_manager.login_message = "Please log in to see that page."
+login_manager.login_message_category = "warning"
+
+# create_app()
+login_manager.init_app(app)
+```
+```python
+# models.py
+from flask_login import UserMixin
+
+class User(UserMixin, db.Model):
+    ...
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+```
+- `login_view` is the endpoint to redirect anonymous users to. Flask-Login appends `?next=...` for you.
+- **`UserMixin`** gives your model the four properties Flask-Login expects: `is_authenticated`, `is_active`, `is_anonymous` and `get_id()` (which returns the primary key as text).
+- **`user_loader`** is your function from "id in the session" to "user object". It is the equivalent of `load_current_user` from Lesson 8-3, and Flask-Login calls it for you, once per request, only when the session has an id. Return `None` when the id is unknown, and Flask-Login treats the visitor as anonymous (the stale-session case is handled).
+
+The mapping between your hand-built code and the extension:
+```
+Lesson 8-3 (by hand)                          Flask-Login
+-------------------------------------------   ---------------------------------------
+session["user_id"] = user.id                  login_user(user)
+session.clear()                               logout_user()
+before_app_request that sets g.user           @login_manager.user_loader
+g.user  (None for visitors)                   current_user  (an anonymous object for visitors)
+@login_required (your decorator)              from flask_login import login_required
+redirect to auth.login?next=...               login_manager.login_view = "auth.login"
+session.permanent for "remember me"           login_user(user, remember=True)
+```
+The login view shrinks:
+```python
+from flask_login import login_user, logout_user, login_required, current_user
+
+if ok:
+    login_user(user, remember=bool(request.form.get("remember")))
+    return redirect(safe_next(request.args.get("next")) or url_for("main.home"))
+```
+Things to notice:
+- **You still validate `next` yourself** with `safe_next`. Flask-Login creates the `next` parameter but does not make redirecting to it safe.
+- You still do the password check, the generic error message and the dummy hash. Flask-Login deals with the session, not with passwords.
+- `remember=True` sets a separate **remember-me cookie** (`remember_token`) that logs the user in again after the browser closes. Treat it as sensitive and keep it `HttpOnly` and `Secure` in production (`REMEMBER_COOKIE_HTTPONLY`, `REMEMBER_COOKIE_SECURE`).
+- In templates, `current_user` is available automatically: `{% if current_user.is_authenticated %}...{% endif %}`. For visitors it is an anonymous user object, so `current_user.name` is an error: always test `is_authenticated` first.
+- Logout stays a POST route calling `logout_user()`.
+- Flask-Login's session now contains `_user_id`, which your login test can check.
+
+**Two routes to the same goal.** Hand-built login (Lesson 8-3) or Flask-Login. The hand-built version is about 40 lines and perfectly adequate for a small app, with nothing hidden. Flask-Login adds remember-me handling, session protection, a consistent `current_user` and a de facto standard that every Flask developer recognises, which makes your code easier to hand over and the security details harder to get subtly wrong. For a real project, use the extension. For understanding, you now have both.
+
+## Part 5: Authorization, roles
+Being logged in is not being allowed. Start with the simplest model: a flag on the user.
+```python
+is_admin: Mapped[bool] = mapped_column(default=False, server_default="0")
+```
+```python
+import functools
+from flask import abort
+from flask_login import current_user, login_required
+
+def admin_required(view):
+    @functools.wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not current_user.is_admin:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+```
+- **403 Forbidden** means "I know who you are, and you may not do this", unlike 401 "I do not know who you are".
+- Stacking `login_required` inside `admin_required` means anonymous visitors are sent to the login page and logged-in non-admins get a 403.
+- For a whole area, protect the **blueprint** once instead of every view:
+```python
+@admin_bp.before_request
+@login_required
+def only_admins():
+    if not current_user.is_admin:
+        abort(403)
+```
+Now a new admin view added next year is protected automatically. **Default to protected**, and opt out deliberately.
+- Give 403 a proper page with `@app.errorhandler(403)` (or `app_errorhandler`).
+
+For more than two kinds of user, replace the flag with a `role` column (`"student"`, `"editor"`, `"admin"`) or a roles table. Keep the check in **one function** so permission rules live in one place.
+
+## Part 6: Authorization, ownership
+Roles answer "what kind of user are you". Ownership answers "is this **your** thing?". It is where most real-world authorization bugs live.
+
+Consider `POST /feedback/5/delete`, available to logged-in users. The view finds feedback 5 and deletes it. **Any logged-in user can now delete anyone's feedback by changing the number.** This is an **insecure direct object reference (IDOR)**, and it is among the most common serious flaws in web applications, because it needs no clever attack, only editing a URL.
+
+**Two routes to the fix.**
+- Route A, load, then compare:
+```python
+entry = db.get_or_404(Feedback, entry_id)
+if entry.user_id != current_user.id and not current_user.is_admin:
+    abort(403)
+```
+Outcome: correct, and the status 403 tells an attacker that feedback 5 exists but is not theirs.
+- Route B, **scope the query to the owner**, so other people's rows do not exist as far as this user is concerned:
+```python
+entry = db.session.scalar(
+    db.select(Feedback).where(Feedback.id == entry_id, Feedback.user_id == current_user.id))
+if entry is None:
+    abort(404)
+```
+Outcome: the same protection, no information leak, and it is hard to forget because the ownership condition is part of the query. Admins use a separate admin view or an explicit `or`.
+
+Choose the route that fits the information policy: 403 when a user may know the thing exists, 404 when they should not. Either way, the rule is: **every view that touches a specific record must check that this user may touch it**, on the server, every time.
+
+Related rules:
+- **Hiding a button is not security.** The delete button may be hidden from non-owners, but anyone can craft the request by hand. The check must be in the view.
+- **Never trust ids or flags from the form**: do not read `user_id` from `request.form`; take it from `current_user`.
+- **Least privilege:** give each role only what it needs.
+- **Log security events** (failed logins, 403s) so you can see attacks happening.
+
+## Part 7: Testing authorization
+```python
+def test_user_cannot_delete_others_feedback(client, make_user, make_feedback):
+    owner = make_user("owner@example.com")
+    other = make_user("other@example.com")
+    entry = make_feedback(user=owner)
+    login(client, "other@example.com")
+    assert client.post(f"/feedback/{entry}/delete").status_code in (403, 404)
+    with client.application.app_context():
+        assert db.session.get(Feedback, entry) is not None       # still exists
+
+def test_admin_pages_forbidden_to_students(client, make_user):
+    make_user("student@example.com")
+    login(client, "student@example.com")
+    assert client.get("/admin/").status_code == 403
+
+def test_anonymous_is_redirected(client):
+    response = client.get("/admin/")
+    assert response.status_code == 302 and "/auth/login" in response.headers["Location"]
+```
+Write a test for **every protected action from the point of view of a user who must not be allowed**. These are the tests that catch the bugs that matter, and they are the ones people forget, because the happy path is what you try by hand.
+
+## Part 8: Common mistakes
+- Protecting only the page that shows a button but not the action it triggers.
+- Exempting login, logout or "harmless" POST routes from CSRF.
+- Reading a user id or role from the form instead of from `current_user`.
+- Using `current_user.name` without checking `is_authenticated`.
+- Forgetting `safe_next` because "Flask-Login does the redirect".
+- Using `random` instead of `secrets` for tokens.
+- Disabling CSRF in tests and never testing it enabled.
+- Forgetting that 403 and 404 reveal different amounts of information.
+
+## Recap
+- CSRF abuses the fact that browsers attach cookies to cross-site requests. A secret token in each form, checked against the session, defeats it. Protect every state-changing request, including login and logout.
+- Flask-Login replaces your session, loader, decorator and remember-me code: `login_user`, `logout_user`, `user_loader`, `login_required`, `current_user`, `UserMixin`. You still hash and check passwords and validate `next` yourself.
+- Authorization has two layers: roles (`admin_required`, a protected blueprint, 403) and ownership (scope the query or compare owners).
+- Fixing IDOR means every record-level action checks the user's right to that record on the server.
+- Test authorization from the point of view of the user who must be refused.
+
+===TASKS===
+### CSRF by hand | guided
+Add the hand-built CSRF check from Part 2 to your app and a delete button as a POST form with the hidden token. First submit it normally and confirm it works. Then send the same request with `curl.exe -X POST` using your session cookie but **no** token, and with a wrong token, and record the status codes. Finally write the "evil page" form from Part 1 as a local HTML file pointing at your running app, open it while logged in, and confirm the request is rejected.
+HINT: In the browser developer tools, copy the cookie value, or use the test client in a script for the no-token case.
+EXPECT: The normal request works, requests without a token or with a wrong token return 400, and the forged form from the other page fails.
+SOL:
+```python
+def test_csrf(client):
+    register(client); login(client)
+    assert client.post("/feedback/1/delete").status_code == 400
+    assert client.post("/feedback/1/delete", data={"csrf_token": "wrong"}).status_code == 400
+    token = get_token(client, "/feedback/")
+    assert client.post("/feedback/1/delete", data={"csrf_token": token}).status_code in (302, 404)
+```
+### Switch to Flask-Login | guided
+Replace your hand-built session code with Flask-Login: add `UserMixin`, the `user_loader`, `LoginManager` with `login_view`, call `login_user` and `logout_user`, and replace your decorator with Flask-Login's `login_required`. Keep `safe_next`. Remove `g.user` and update templates to `current_user`. Run your Lesson 8-3 tests with minimal changes (they should mostly pass). List which of your old lines each Flask-Login feature replaced, using the mapping table.
+HINT: Flask-Login stores `_user_id` in the session. Update any test that looked for `user_id`.
+EXPECT: Tests pass after small edits, about 20 lines of your own code are gone, and you can match each to a Flask-Login feature.
+SOL:
+```python
+# models.py
+from flask_login import UserMixin
+
+class User(UserMixin, db.Model):
+    ...
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+```
+```python
+# test update
+with client.session_transaction() as sess:
+    assert "_user_id" in sess
+```
+### Admin area | independent
+Create an `admin` blueprint with a dashboard and a user list, protected for the whole blueprint with a `before_request` requiring an admin (403 for logged-in non-admins, redirect for anonymous). Add a 403 error page. Write tests for anonymous, student and admin, and a test that a **new** view added to the blueprint is protected without adding any decorator.
+HINT: Registering a route in the test with `@admin_bp.route` after creation is not possible. Instead add a second view to the blueprint beforehand and test both.
+EXPECT: Anonymous gets a redirect, student gets 403 with your page, admin gets 200 on both views.
+SOL:
+```python
+@bp.before_request
+@login_required
+def only_admins():
+    if not current_user.is_admin:
+        abort(403)
+
+@bp.route("/")
+def dashboard():
+    return render_template("admin/dashboard.html")
+
+@bp.route("/users")
+def users():
+    rows = db.session.scalars(db.select(User).order_by(User.id)).all()
+    return render_template("admin/users.html", users=rows)
+```
+### Close the IDOR | independent
+Write the vulnerable version of `POST /feedback/<id>/delete` (any logged-in user may delete any entry) and a test that **proves** the vulnerability by deleting another user's entry. Then fix it twice: Route A (load then compare, 403) and Route B (scope the query, 404), with the admin exception. Run the same test against each and record what an attacker learns from the status code in each route. Decide which policy fits feedback and justify it in two sentences.
+HINT: The test creates two users, has `other` delete `owner`'s entry, and then checks whether the row still exists.
+EXPECT: The vulnerable version loses the row. Both fixes keep it. Route A reveals existence through 403, Route B does not.
+SOL:
+```python
+@bp.post("/<int:entry_id>/delete")
+@login_required
+def delete(entry_id):
+    entry = db.session.scalar(
+        db.select(Feedback).where(Feedback.id == entry_id))
+    if entry is None:
+        abort(404)
+    if entry.user_id != current_user.id and not current_user.is_admin:
+        abort(403)          # Route A. For Route B filter by Feedback.user_id and abort(404)
+    db.session.delete(entry)
+    db.session.commit()
+    flash("Feedback deleted.", "success")
+    return redirect(url_for("feedback.index"))
+```
+### Authorization test matrix | challenge
+Build a table-driven test that lists every state-changing and every admin route of Hub (method, URL pattern, required role) and checks the response for each of three actors: anonymous, student who owns nothing, and the owner (and an admin where relevant). The expected results are redirect to login, 403 or 404, and success. Run it with CSRF enabled so the tokens are exercised too. Fail the test if a **new** route appears in `app.url_map` that is not listed in the table (so you cannot add an endpoint and forget to decide its permissions).
+HINT: Iterate `app.url_map.iter_rules()` and compare the set of endpoints with your table keys, ignoring `static`.
+EXPECT: Every route has an explicit entry and a decided policy, all expectations pass, and adding an unlisted route makes the test fail with its endpoint name.
+SOL:
+```python
+POLICY = {
+    "main.home":            ("GET",  "public"),
+    "lessons.index":        ("GET",  "public"),
+    "feedback.delete":      ("POST", "owner_or_admin"),
+    "progress.index":       ("GET",  "login"),
+    "admin.dashboard":      ("GET",  "admin"),
+}
+
+def test_every_route_has_a_policy(app):
+    endpoints = {r.endpoint for r in app.url_map.iter_rules() if r.endpoint != "static"}
+    missing = endpoints - POLICY.keys()
+    assert not missing, f"decide permissions for: {sorted(missing)}"
+```
+===QUIZ===
+Q: What does CSRF exploit?
+- Weak passwords
+- Browsers attaching the user's cookies to requests made by other sites *
+- SQL injection
+- Slow hashing
+WHY: A malicious page can make your browser send a request to Hub with your cookie attached.
+Q: How does a CSRF token stop the attack?
+- It encrypts the cookie
+- It is a secret in the session and in each form that the attacker's page cannot read or guess *
+- It hides the URL
+- It blocks all POST requests
+WHY: The forged request lacks the token, so the server rejects it.
+Q: What status does a missing or wrong CSRF token give?
+TYPE: 400
+WHY: Bad Request. Flask-WTF also says "The CSRF token is missing."
+Q: Why use `secrets.token_hex` rather than `random` for tokens?
+- It is shorter
+- `secrets` is cryptographically secure and `random` is predictable *
+- `random` is deprecated
+- It avoids imports
+WHY: Predictable tokens can be guessed, which defeats their purpose.
+Q: Which Flask-Login function replaces `session["user_id"] = user.id`?
+TYPE: login_user
+WHY: `login_user(user)` stores the id in the session and marks the user as logged in.
+Q: What is the job of the `user_loader` function?
+- Create users
+- Turn the id stored in the session into a user object, once per request *
+- Hash passwords
+- Validate `next`
+WHY: It replaces your `load_current_user` and returns `None` for unknown ids.
+Q: With Flask-Login, who is responsible for checking that `next` is a safe local path?
+- Flask-Login
+- You: it creates the `next` parameter but does not validate it *
+- The browser
+- Nobody, it is safe
+WHY: Redirecting to an unvalidated `next` is an open redirect.
+Q: What is the difference between 401 and 403?
+- None
+- 401 means not authenticated (unknown user), 403 means authenticated but not allowed *
+- 403 means not found
+- 401 is for admins
+WHY: One says "log in", the other says "you may not do this".
+Q: What is an insecure direct object reference (IDOR)?
+- A broken link
+- Acting on a record by its id without checking that this user may touch it *
+- A missing index
+- A slow query
+WHY: Changing `/feedback/5/delete` to another number should not let you delete someone else's data.
+Q: What is the benefit of scoping the query with `Feedback.user_id == current_user.id`?
+- It is faster
+- Other people's rows simply do not exist for this user, so the check is hard to forget and nothing leaks *
+- It avoids hashing
+- It replaces CSRF
+WHY: The ownership rule is part of the query itself, and a missing row gives 404 instead of revealing existence.
+</script>
+<script type="text/markdown" id="n-8-5">
+===NOTES===
+## What you will be able to do after this lesson
+You will be able to organise settings into development, testing and production configurations that refuse to start insecurely, create the first administrator safely from the command line, add basic security headers, log security events, review an application against a security checklist, and combine the whole of Week 8 (blueprints, password hashing, login, CSRF, authorization) into **Hub v5**, a multi-user application with a defensible security design.
+
+Lessons 8-1 to 8-4 gave you the parts. This lesson is about the **seams**: configuration, bootstrapping, defaults and review. Most real security failures are not clever attacks on clever code. They are a debug flag left on, a default secret key, a forgotten admin route, or an absent log line.
+
+## Part 1: How the pieces fit
+```
+request
+  -> CSRF check (before_app_request or CSRFProtect)         Lesson 8-4
+  -> Flask-Login loads current_user from the session         Lesson 8-4
+  -> blueprint before_request (admin only?)                  Lessons 8-1, 8-4
+  -> view: validate input, check ownership, use ORM          Lessons 7-4, 8-4
+  -> template: autoescape, csrf_token in forms               Lessons 3-4, 8-4
+  -> after_request: security headers                         this lesson
+response
+```
+Every layer assumes the one before it **might have failed or been forgotten**. This is called **defence in depth**: SameSite cookies *and* CSRF tokens, validation in Python *and* constraints in the database, `login_required` *and* an ownership check. No single control has to be perfect.
+
+## Part 2: Configuration that fails safe
+Settings differ by environment, and one wrong default can be a vulnerability.
+```python
+# config.py
+import os
+from pathlib import Path
+from datetime import timedelta
+
+BASE_DIR = Path(__file__).resolve().parent
+
+class Config:
+    SQLALCHEMY_DATABASE_URI = "sqlite:///hub.db"
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    PERMANENT_SESSION_LIFETIME = timedelta(days=14)
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+
+class DevelopmentConfig(Config):
+    DEBUG = True
+    SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-not-secret")
+
+class TestingConfig(Config):
+    TESTING = True
+    SECRET_KEY = "testing-key"
+    SQLALCHEMY_DATABASE_URI = "sqlite://"
+
+class ProductionConfig(Config):
+    DEBUG = False
+    SESSION_COOKIE_SECURE = True
+    REMEMBER_COOKIE_SECURE = True
+    REMEMBER_COOKIE_HTTPONLY = True
+
+CONFIGS = {"development": DevelopmentConfig, "testing": TestingConfig,
+           "production": ProductionConfig}
+```
+```python
+# hub/__init__.py
+def create_app(config_name=None, overrides=None):
+    name = config_name or os.environ.get("HUB_ENV", "development")
+    app = Flask(__name__)
+    app.config.from_object(CONFIGS[name])
+    if overrides:
+        app.config.update(overrides)
+    if name == "production" and not app.config.get("SECRET_KEY"):
+        raise RuntimeError("SECRET_KEY must be set in production")
+    ...
+```
+The design choices:
+- **Inheritance.** A base `Config` holds what is common, and each environment overrides what differs.
+- **No secret in code.** `SECRET_KEY` has no default in the base and production classes. Only development has an obviously fake default, so you never mistake it for real.
+- **Fail fast.** A production app **refuses to start** without a secret key. A crash at launch is infinitely better than quietly running with a guessable key that lets anyone forge any session (Lesson 4-4).
+- Production turns on `SESSION_COOKIE_SECURE`. Development leaves it off so login works over plain `http://127.0.0.1`.
+- `DEBUG = False` in production. The interactive debugger (Lesson 3-2) lets visitors **execute Python on your server**.
+- Select the environment with a variable: `$env:HUB_ENV = "production"` in PowerShell. If Flask finds the package **python-dotenv**, `flask` commands also read variables from a `.env` file in the project folder, a convenient place for local secrets, which belongs in `.gitignore`.
+
+## Part 3: Creating the first administrator
+A common beginner trap: how does the first admin exist? The wrong answers are a hard-coded default admin account (`admin` / `admin` is found by every attacker within hours) or a registration form with an "I am an admin" checkbox. The right answer is a **command-line command run by whoever controls the server**.
+```python
+import click
+from flask.cli import with_appcontext
+
+@click.command("create-admin")
+@click.option("--name", prompt=True)
+@click.option("--email", prompt=True)
+@click.password_option()
+def create_admin(name, email, password):
+    """Create an administrator."""
+    email = email.strip().lower()
+    message = validate_password(password, email)
+    if message:
+        raise click.ClickException(message)
+    user = User(name=name.strip(), email=email, is_admin=True)
+    user.set_password(password)
+    db.session.add(user)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        raise click.ClickException("That email is already registered.")
+    click.echo(f"Administrator {email} created.")
+```
+Register it with `app.cli.add_command(create_admin)` and run `flask --app hub create-admin`. Details:
+- `prompt=True` asks for missing options interactively, and **`click.password_option()` hides the typing and asks twice**, so the password never appears on screen or in shell history (unlike `--password secret` on the command line).
+- The same `validate_password` and hashing path as registration, so there is one set of rules.
+- Flask CLI commands already run inside an application context, so `db.session` works.
+- There is no web route that can make an admin. Only someone with shell access to the server can.
+
+## Part 4: Security headers
+A response can carry headers that instruct the browser to be stricter. Add a few in one place:
+```python
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+```
+- **`X-Content-Type-Options: nosniff`** stops the browser guessing that an uploaded text file is really a script (relevant to Lesson 4-2's uploads).
+- **`X-Frame-Options: DENY`** forbids other sites from embedding your pages in a frame, which blocks **clickjacking** (an invisible frame of your site laid over a fake button).
+- **`Referrer-Policy`** limits how much of your URL is sent to other sites when users follow links.
+- `after_request` receives and **must return** the response.
+- A **Content-Security-Policy** header is the strongest tool against injected scripts: it lists the sources a page may load from. For example `default-src 'self'; style-src 'self' https://cdn.jsdelivr.net; script-src 'self' https://cdn.jsdelivr.net` fits a Bootstrap-from-CDN site. It breaks inline scripts and styles, so introduce it carefully, test every page, and use the browser's console messages to see what it blocks. HTTPS-related headers (`Strict-Transport-Security`) come with deployment in Week 11.
+
+## Part 5: Logging security events
+When something goes wrong, or someone attacks you, logs are the only witness. Flask provides `app.logger`:
+```python
+current_app.logger.warning("failed login for %s from %s", email, request.remote_addr)
+current_app.logger.warning("forbidden: user %s tried %s %s", current_user.get_id(), request.method, request.path)
+current_app.logger.info("admin created: %s", email)
+```
+- Use the **logging arguments** (`%s` with values after), not an f-string. Logging libraries format only if the message is emitted, and it keeps messages uniform for searching.
+- Log **events**: failed and successful logins, lockouts, 403 responses, admin actions, password changes.
+- Log **who, what, when and from where**, and **never the password**, the CSRF token, session cookies or full hashes. Logs are copied and shared much more casually than databases.
+- Anyone able to put newlines in a logged value could forge extra log lines (log injection). Logging the email after normalisation, and truncating long values, reduces the risk.
+
+## Part 6: A security review checklist
+Before shipping, walk through categories (this follows the spirit of the OWASP Top 10, a public list of the most common web security failures):
+- **Injection.** Is every SQL value bound (ORM or `:name` parameters)? Is every sort or column name from an allowlist?
+- **Authentication.** Hashed with a slow salted hash? Generic login error? Rate limiting or lockout? Secure cookies in production? Strong secret key from the environment?
+- **Session and CSRF.** CSRF protection on **every** state-changing route? Logout by POST? `next` validated?
+- **Access control.** Does every route have a decided policy (the matrix test of Lesson 8-4)? Do record-level actions check ownership? Is the admin area protected as a whole?
+- **XSS.** Autoescaping on? Any `|safe` on user content? (Lesson 3-4)
+- **Uploads.** Extension allowlist, size limit, generated names, served safely? (Lesson 4-2)
+- **Misconfiguration.** Debug off in production? Default accounts removed? Error pages free of stack traces? Secrets out of Git?
+- **Errors and logging.** Custom 400/403/404/500 pages that reveal nothing technical? Security events logged?
+- **Dependencies.** Are libraries current? (`python -m pip list --outdated`, and watch security advisories.)
+
+The goal is not perfection but **no obvious holes and a way of noticing the rest**.
+
+## Part 7: Project, Hub v5
+Build Hub v5 on top of Hub v4. Requirements:
+- **Architecture:** the package with blueprints `main`, `auth`, `lessons`, `feedback`, `progress` and `admin`, an app factory with environment-based configuration classes that fail fast, and extensions in `extensions.py`.
+- **Accounts:** registration with validation (Lesson 8-2), login with generic errors, a dummy hash, remember-me and a failed-login limiter (Lesson 8-3), logout by POST, password change that requires the current password, and hash upgrading.
+- **Flask-Login and CSRF:** `login_manager`, `UserMixin`, `CSRFProtect` on every form, with tests that exercise CSRF enabled.
+- **Authorization:** admin area protected at the blueprint level with a 403 page, ownership rules for feedback and progress, and a `create-admin` command. The stand-in login from earlier weeks is **deleted**.
+- **Feedback and progress** now belong to real users, with unique constraints and migrations for any schema change (a new Alembic migration for the lock fields and `is_admin`).
+- **Security hygiene:** security headers, logged security events, custom error pages (400, 403, 404, 500) that expose nothing technical.
+- **Tests:** the authorization matrix (including the test that fails on an undecided new route), login/logout/CSRF tests, ownership tests, config tests (production without a key refuses to start), and the migration tests from Lesson 7-5.
+- **Documentation:** a `README.md` with setup commands and a `SECURITY.md` listing, for each checklist category above, what Hub does about it.
+
+Build in this order: configuration classes, auth blueprint (register, login, logout), Flask-Login, CSRF, authorization and admin, ownership, `create-admin`, headers and logging, error pages, tests, documentation. Commit after each step.
+
+## Part 8: Common mistakes
+- A default or guessable `SECRET_KEY` that survives into production.
+- `DEBUG=True` on a public server.
+- Seeding a default admin with a known password.
+- Protecting pages but not the actions behind them.
+- A new route added without deciding who may use it.
+- Logging passwords, tokens or cookies.
+- Treating the checklist as a one-time task.
+
+## Recap
+- Defence in depth: every layer (cookies, tokens, validation, constraints, decorators, ownership) assumes the others might fail.
+- Use configuration classes per environment, no secret in code, and make production refuse to start without a secret key.
+- Create the first admin with a CLI command that prompts for a hidden, confirmed password. No web route should be able to create one.
+- Add `nosniff`, frame and referrer headers, consider a Content-Security-Policy, and log security events without logging secrets.
+- Review against a checklist, keep a test that forces a permission decision for every route, and document what you did.
+
+===TASKS===
+### Configuration classes that fail fast | guided
+Create `config.py` with the classes from Part 2 and select one by the `HUB_ENV` variable in `create_app`. Write tests: development gets `DEBUG=True`, testing uses an in-memory database, production without `SECRET_KEY` raises `RuntimeError`, and production **with** a key sets `SESSION_COOKIE_SECURE`. Use `monkeypatch.setenv` or `os.environ` to control the environment inside tests.
+HINT: Remember to remove `SECRET_KEY` from the environment for the failing test, and restore it afterwards.
+EXPECT: All four tests pass, and starting the app in production without a key stops immediately with your message.
+SOL:
+```python
+import os
+import pytest
+from hub import create_app
+
+def test_production_requires_secret(monkeypatch):
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        create_app("production")
+
+def test_production_secure_cookies(monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "x" * 32)
+    app = create_app("production", {"SQLALCHEMY_DATABASE_URI": "sqlite://"})
+    assert app.config["SESSION_COOKIE_SECURE"] is True
+    assert app.config["DEBUG"] is False
+```
+### The create-admin command | guided
+Implement `flask --app hub create-admin` with hidden, confirmed password prompts and the same validation as registration. Write tests using the Flask CLI test runner with `input=` for the prompts: a successful creation, a weak password refused, a duplicate email refused. Confirm in a test that the created user has `is_admin=True`, a hash that is not the password, and that no web route can create an admin (try a registration POST containing `is_admin=1` and show the account is **not** an admin).
+HINT: `app.test_cli_runner().invoke(args=["create-admin"], input="Ada\nada@x.co\nlong enough pw\nlong enough pw\n")`.
+EXPECT: Three CLI tests pass, and the forged `is_admin` field on registration is ignored.
+SOL:
+```python
+def test_create_admin(app):
+    runner = app.test_cli_runner()
+    result = runner.invoke(args=["create-admin"],
+                           input="Ada\nada@x.co\nlong enough pw\nlong enough pw\n")
+    assert result.exit_code == 0
+    with app.app_context():
+        user = db.session.scalar(db.select(User).where(User.email == "ada@x.co"))
+        assert user.is_admin and user.password_hash != "long enough pw"
+
+def test_registration_cannot_make_admin(client, app):
+    client.post("/auth/register", data={"name": "Eve", "email": "eve@x.co",
+                "password": "long enough pw", "is_admin": "1"})
+    with app.app_context():
+        assert not db.session.scalar(db.select(User).where(User.email == "eve@x.co")).is_admin
+```
+### Headers and logging | independent
+Add the `after_request` security headers of Part 4 and a test that every response (including a 404) carries them. Add security logging for failed logins, lockouts and 403 responses using `current_app.logger` with logging arguments, and write tests that capture the log output with a custom handler (or `caplog`) and assert that: a failed login logs the email, a 403 logs the user id and path, and **no log record ever contains the submitted password**.
+HINT: Attach a handler that appends `record.getMessage()` to a list. Submit a distinctive password such as `Zebra-12345-secret` and search all captured messages for it.
+EXPECT: Headers present on all responses, log events recorded, and the password never appears in any captured message.
+SOL:
+```python
+def test_no_password_in_logs(client, app):
+    messages = []
+    class Capture(logging.Handler):
+        def emit(self, record): messages.append(record.getMessage())
+    app.logger.addHandler(Capture())
+    app.logger.setLevel(logging.INFO)
+    client.post("/auth/login", data={"email": "nobody@x.co", "password": "Zebra-12345-secret"})
+    assert any("nobody@x.co" in m for m in messages)
+    assert not any("Zebra-12345-secret" in m for m in messages)
+```
+### Security review of Hub | independent
+Write a `SECURITY.md` that walks through the checklist of Part 6. For each category, name the file or function in **your** Hub that handles it, or write "not handled" and open a small fix. Then verify three claims by experiment: run an SQL-injection style input against your search, submit `<script>` in a feedback message and check the page escapes it, and request an admin URL as a student. Record what happened.
+HINT: Use the test client for the experiments and keep them as permanent tests.
+EXPECT: Every checklist line has a concrete answer, the three experiments behave safely, and the experiments live on as tests.
+SOL:
+```python
+def test_xss_is_escaped(client, make_user, login_as):
+    login_as("ada@example.com")
+    client.post("/feedback/", data={"lesson_id": 1, "rating": 5,
+                                    "message": "<script>alert(1)<\/script>"})
+    html = client.get("/lessons/1").get_data(as_text=True)
+    assert "<script>alert(1)<\/script>" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+```
+### Hub v5 | challenge
+Build Hub v5 as described in Part 7, including `README.md` and `SECURITY.md`. Finish with a **self-review**: pick the three riskiest places in your own code (for example the password change, the ownership check on progress, the admin blueprint) and for each write the attack you considered, the test that proves it fails, and what you would add with more time (rate limiting with Flask-Limiter, email verification, password reset by emailed token, two-factor login).
+HINT: Treat the matrix test from Lesson 8-4 as your safety net: it should fail whenever you add a route without deciding its policy.
+EXPECT: All tests pass with CSRF enabled, `create-admin` works from the command line, production refuses to start without a key, and your self-review names three real risks with tests.
+SOL:
+```python
+@bp.route("/password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    errors = {}
+    if request.method == "POST":
+        current = request.form.get("current", "")
+        new = request.form.get("new", "")
+        if not current_user.check_password(current):
+            errors["current"] = "Current password is wrong."
+        elif new == current:
+            errors["new"] = "Choose a different password."
+        else:
+            message = validate_password(new, current_user.email)
+            if message:
+                errors["new"] = message
+            elif new != request.form.get("confirm", ""):
+                errors["confirm"] = "The two passwords do not match."
+        if not errors:
+            current_user.set_password(new)
+            db.session.commit()
+            current_app.logger.info("password changed for user %s", current_user.get_id())
+            flash("Password updated.", "success")
+            return redirect(url_for("main.home"))
+        return render_template("auth/password.html", errors=errors), 400
+    return render_template("auth/password.html", errors=errors)
+```
+===QUIZ===
+Q: What does "defence in depth" mean?
+- Using one very strong control
+- Layering several controls so that no single failure compromises the application *
+- Hiding the source code
+- Encrypting everything
+WHY: SameSite cookies and CSRF tokens, validation and constraints, decorators and ownership checks each cover for the others.
+Q: Why should a production app refuse to start when `SECRET_KEY` is missing?
+- To save memory
+- Running with a guessable key would let anyone forge sessions, and a crash at launch is safer *
+- Flask requires it
+- Because keys expire
+WHY: Failing fast turns a silent vulnerability into an obvious startup error.
+Q: Why must `DEBUG` be off in production?
+- It is slower
+- The interactive debugger can let visitors run Python code on the server *
+- It disables logging
+- It hides templates
+WHY: Debug mode is for development only (Lesson 3-2).
+Q: How should the first administrator be created?
+- A default `admin` account in the schema
+- A registration checkbox
+- A command-line command run by someone with server access, with a hidden password prompt *
+- A public URL
+WHY: Any web-reachable way of creating admins can be abused, and default credentials are found by attackers quickly.
+Q: Which Click helper asks for a password twice without echoing it?
+TYPE: password_option | click.password_option
+WHY: It hides the input and asks for confirmation, keeping the password out of the screen and shell history.
+Q: What does `X-Frame-Options: DENY` prevent?
+- Slow loading
+- Other sites from embedding your pages in a frame, blocking clickjacking *
+- CSRF
+- SQL injection
+WHY: Clickjacking overlays an invisible frame of your site on a fake button.
+Q: Which hook adds headers to every response?
+TYPE: after_request | @app.after_request
+WHY: It receives the response and must return it.
+Q: Which of these must never appear in logs?
+- The user's email on a failed login
+- The request path of a 403
+- The submitted password *
+- The time of the event
+WHY: Logs are shared and stored casually. Record events, never secrets.
+Q: Why keep a test that fails when a new route has no entry in the permissions table?
+- To slow down the build
+- So adding an endpoint forces a decision about who may use it *
+- Because Flask requires it
+- To count routes
+WHY: Forgotten permissions are the most common access control failure.
+Q: Which tool in this lesson is the strongest defence against injected scripts, but must be introduced carefully because it can break inline scripts and styles?
+- `X-Frame-Options`
+- `Content-Security-Policy` *
+- `Referrer-Policy`
+- `nosniff`
+WHY: A Content-Security-Policy lists the sources a page may load from, so injected scripts cannot run, at the price of testing every page.
+</script>
 <script>
 const $=s=>document.querySelector(s),esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const W=['Python refresher I','Python refresher II','Web and Flask basics','Forms and structure','SQL I','SQL II','SQLAlchemy','Auth and architecture','APIs I','APIs II and testing','Security and deployment','Capstone and IoT'];
@@ -11967,7 +13742,12 @@ q:[['What does <code>{% extends "base.html" %}</code> do?',['Makes the page reus
 {"id": "7-2", "t": "Flask-SQLAlchemy", "v": "RUUmEOooKVo", "s": "Flask-SQLAlchemy wires SQLAlchemy into Flask: an engine from config, a request-scoped <code>db.session</code>, and helpers like <code>db.get_or_404</code> and <code>db.paginate</code>. Older tutorials use <code>Model.query</code>, which is now legacy.", "tm": [["db.session", "A session scoped to the current request."], ["init_app", "Connects an extension object to an app created later."], ["Instance folder", "Where relative SQLite paths are stored."], ["Legacy Model.query", "The older query interface replaced by select()."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
 {"id": "7-3", "t": "Relationships in the ORM", "v": "nv73", "nv": 1, "s": "A foreign key is the column, a relationship is the Python navigation built on it. Lazy loading causes N+1 queries, which selectinload or an aggregate query fixes. Cascades can live in the ORM, the database, or both.", "tm": [["relationship", "A Python attribute that loads related rows."], ["N+1 problem", "One query for a list plus one lazy query per row."], ["selectinload", "Loads all children with one extra IN query."], ["Association object", "A model for a junction table whose rows carry data."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
 {"id": "7-4", "t": "Querying with the ORM", "v": "nv74", "nv": 1, "s": "A select() is built with chained methods and executed by the session. Operators, joins, func, group_by, case and exists map directly to SQL, ORM expressions bind values automatically, and bulk update and delete are single statements.", "tm": [["select()", "An object describing a query, executed by the session."], ["scalars()", "Unwraps the first column of each row, often model objects."], ["func", "Generates SQL functions such as count and avg."], ["Bulk update", "One UPDATE statement that bypasses ORM object tracking."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
-{"id": "7-5", "t": "Migrations with Flask-Migrate and Hub v4", "v": "nv75", "nv": 1, "s": "Alembic, through Flask-Migrate, generates migrations by comparing models with the database. On SQLite use batch mode and named constraints, always read the generated file, and hand-edit renames and data moves that autogenerate cannot understand.", "tm": [["Alembic", "The migration tool behind Flask-Migrate."], ["Batch mode", "Rebuilds tables so SQLite can alter them."], ["alembic_version", "The table that records the current revision."], ["db check", "Fails when models differ from the migrations."]], "w": 7, "d": "", "c": "", "tk": [], "q": []}
+{"id": "7-5", "t": "Migrations with Flask-Migrate and Hub v4", "v": "nv75", "nv": 1, "s": "Alembic, through Flask-Migrate, generates migrations by comparing models with the database. On SQLite use batch mode and named constraints, always read the generated file, and hand-edit renames and data moves that autogenerate cannot understand.", "tm": [["Alembic", "The migration tool behind Flask-Migrate."], ["Batch mode", "Rebuilds tables so SQLite can alter them."], ["alembic_version", "The table that records the current revision."], ["db check", "Fails when models differ from the migrations."]], "w": 7, "d": "", "c": "", "tk": [], "q": []},
+{"id": "8-1", "t": "Blueprints and project architecture", "v": "GZ51so48YnM", "s": "A blueprint bundles one feature’s routes and handlers without an app, and an application factory builds a fresh configurable app. Endpoints become <code>blueprint.function</code>, shared extensions live in <code>extensions.py</code> to avoid circular imports, and handler scope matters.", "tm": [["Blueprint", "A bundle of routes and handlers for one feature, registered on an app."], ["Application factory", "A create_app function that builds a new configured app."], ["Endpoint", "The name url_for uses, now blueprint.function."], ["Circular import", "Two modules importing each other, which fails at startup."]], "w": 8, "d": "", "c": "", "tk": [], "q": []},
+{"id": "8-2", "t": "Passwords and hashing", "v": "nv82", "nv": 1, "s": "Never store passwords as text or reversible encryption. Use a slow, salted hash through <code>generate_password_hash</code> and <code>check_password_hash</code>, normalise emails, apply sensible password rules, and let the UNIQUE constraint reject duplicate accounts.", "tm": [["Hash", "A one-way function: easy to compute, impossible to reverse."], ["Salt", "A random per-password value that makes every hash unique."], ["scrypt", "A deliberately slow, memory-hungry password hash."], ["User enumeration", "Learning which accounts exist from different error messages."]], "w": 8, "d": "", "c": "", "tk": [], "q": []},
+{"id": "8-3", "t": "Login with sessions, built by hand", "v": "t9zA1gvrTvo", "s": "Login means putting the user id in the signed session, and logout means clearing it. Load the current user in a before_app_request hook, protect views with a decorator, give generic errors, and accept only local paths in <code>next</code> to avoid an open redirect.", "tm": [["Authentication", "Proving who you are."], ["Authorization", "Deciding what you may do."], ["Open redirect", "Redirecting to an unchecked, attacker-supplied URL."], ["Session fixation", "Planting a session before the victim logs in."]], "w": 8, "d": "", "c": "", "tk": [], "q": []},
+{"id": "8-4", "t": "CSRF, Flask-Login and authorization", "v": "t9zA1gvrTvo", "s": "A secret token in each form defeats CSRF. Flask-Login automates your session, loader, decorator and remember-me code, while you still hash passwords and validate <code>next</code>. Authorization needs roles and ownership checks on every record-level action.", "tm": [["CSRF", "Forged requests that ride on the browser’s automatically attached cookies."], ["user_loader", "Turns the id in the session into a user object."], ["403 vs 401", "Forbidden versus not authenticated."], ["IDOR", "Acting on a record by id without checking ownership."]], "w": 8, "d": "", "c": "", "tk": [], "q": []},
+{"id": "8-5", "t": "Hub v5: configuration, security and architecture", "v": "nv85", "nv": 1, "s": "Use per-environment configuration that fails safe, create the first admin from a CLI command, add security headers and security logging, and review the app against a checklist. Hub v5 combines blueprints, hashing, login, CSRF and authorization.", "tm": [["Defence in depth", "Layering controls so no single failure is fatal."], ["Fail fast", "Refusing to start insecurely."], ["Security headers", "Response headers that make the browser stricter."], ["Security checklist", "A review of injection, auth, CSRF, access control and more."]], "w": 8, "d": "", "c": "", "tk": [], "q": []}
 ];
 const K='pythonhub-v1';let S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
 S=Object.assign({done:{},quiz:{},score:{},watched:{},time:{},log:{},days:{},theme:'dark',last:null},S||{});
